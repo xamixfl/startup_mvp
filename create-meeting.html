@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meetup — Создать встречу</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        body {
+            background: #f8fafc;
+            color: #1e293b;
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+        
+        .page {
+            max-width: 760px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+        
+        .logo {
+            font-size: 28px;
+            font-weight: 800;
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        
+        .back-link {
+            color: #64748b;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 28px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.05);
+        }
+        
+        .title {
+            font-size: 24px;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+        
+        .subtitle {
+            color: #64748b;
+            margin-bottom: 24px;
+        }
+        
+        .form-group {
+            margin-bottom: 18px;
+        }
+        
+        .form-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #475569;
+        }
+        
+        .form-input,
+        .form-textarea,
+        .form-select {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 2px solid #e2e8f0;
+            font-size: 15px;
+            transition: border-color 0.2s;
+        }
+        
+        .form-textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        
+        .form-input:focus,
+        .form-textarea:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        
+        @media (max-width: 700px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .hint {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 6px;
+        }
+        
+        .btn {
+            width: 100%;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .btn:hover {
+            background: #2563eb;
+        }
+        
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 14px 20px;
+            border-radius: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <a href="index.html" class="logo">MEETUP</a>
+            <a href="index.html" class="back-link">← К ленте</a>
+        </div>
+        
+        <div class="card">
+            <div class="title">Создать встречу</div>
+            <div class="subtitle">Заполни основные данные, и встреча появится в ленте.</div>
+            
+            <form id="create-meeting-form">
+                <div class="form-group">
+                    <label class="form-label" for="meeting-headline">Запись для ленты *</label>
+                    <textarea id="meeting-headline" class="form-textarea" placeholder="Например: Ищем пару человек на вечер настолок — уютно, без спешки." required></textarea>
+                    <div class="hint">Эта запись будет видна в ленте как короткое описание.</div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="meeting-topic">Категория *</label>
+                    <select id="meeting-topic" class="form-select" required>
+                        <option value="" disabled selected>Выберите тему</option>
+                        <option value="boardgames">🎲 Настольные игры</option>
+                        <option value="tennis">🎾 Теннис</option>
+                        <option value="football">⚽ Футбол</option>
+                        <option value="running">🏃 Бег</option>
+                        <option value="coffee">☕ Кофе</option>
+                        <option value="cinema">🎬 Кино</option>
+                        <option value="language">🗣️ Языковая практика</option>
+                        <option value="hiking">🥾 Походы</option>
+                        <option value="music">🎵 Музыка</option>
+                        <option value="photography">📷 Фотография</option>
+                    </select>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="meeting-max-slots">Количество участников *</label>
+                        <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50" placeholder="Например: 6" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="meeting-expires-at">Время жизни *</label>
+                        <input type="datetime-local" id="meeting-expires-at" class="form-input" required>
+                        <div class="hint">Когда встреча исчезнет из ленты.</div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="meeting-city">Город / район *</label>
+                    <input type="text" id="meeting-city" class="form-input" placeholder="Например: Москва, Хамовники" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="meeting-details">Подробное описание *</label>
+                    <textarea id="meeting-details" class="form-textarea" placeholder="Расскажи подробнее: правила, формат, что взять с собой и т.д." required></textarea>
+                </div>
+                
+                <button type="submit" class="btn">Опубликовать встречу</button>
+            </form>
+        </div>
+    </div>
+    
+    <div id="notification" class="notification"></div>
+    
+    <script>
+        function showNotification(message) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+        
+        function saveMeeting(meeting) {
+            const raw = localStorage.getItem('meetup_meetings');
+            const list = raw ? JSON.parse(raw) : [];
+            list.unshift(meeting);
+            localStorage.setItem('meetup_meetings', JSON.stringify(list));
+        }
+        
+        document.getElementById('create-meeting-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            
+            const headline = document.getElementById('meeting-headline').value.trim();
+            const topic = document.getElementById('meeting-topic').value;
+            const maxSlots = parseInt(document.getElementById('meeting-max-slots').value);
+            const expiresAt = document.getElementById('meeting-expires-at').value;
+            const city = document.getElementById('meeting-city').value.trim();
+            const details = document.getElementById('meeting-details').value.trim();
+            
+            if (!headline || !topic || !maxSlots || !expiresAt || !city || !details) {
+                showNotification('Заполните все обязательные поля');
+                return;
+            }
+            
+            const now = new Date();
+            const expiresDate = new Date(expiresAt);
+            const diffHours = (expiresDate - now) / (1000 * 60 * 60);
+            
+            if (diffHours <= 0) {
+                showNotification('Время жизни должно быть больше текущего времени');
+                return;
+            }
+            
+            if (diffHours > 24) {
+                showNotification('Максимальный срок жизни встречи — 24 часа');
+                return;
+            }
+            
+            const meeting = {
+                id: `m_${Date.now()}`,
+                title: headline,
+                description: details,
+                topic: topic,
+                city: city,
+                max_slots: maxSlots,
+                participants_count: 1,
+                expires_at: expiresDate.toISOString(),
+                creator: {
+                    name: 'Вы',
+                    age: null,
+                    avatar_url: ''
+                }
+            };
+            
+            saveMeeting(meeting);
+            showNotification('Встреча опубликована');
+            
+            setTimeout(() => {
+                window.location.href = `meeting.html?id=${meeting.id}`;
+            }, 600);
+        });
+        
+        function setExpirationLimits() {
+            const input = document.getElementById('meeting-expires-at');
+            const now = new Date();
+            const maxDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            
+            const toLocalValue = (date) => {
+                const pad = (num) => String(num).padStart(2, '0');
+                return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+            };
+            
+            input.min = toLocalValue(now);
+            input.max = toLocalValue(maxDate);
+        }
+        
+        document.addEventListener('DOMContentLoaded', setExpirationLimits);
+    </script>
+</body>
+</html>

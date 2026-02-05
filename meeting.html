@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meetup — Встреча</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        body {
+            background: #f8fafc;
+            color: #1e293b;
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+        
+        .page {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+        
+        .logo {
+            font-size: 28px;
+            font-weight: 800;
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        
+        .back-link {
+            color: #64748b;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .meeting-layout {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+        
+        @media (max-width: 900px) {
+            .meeting-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.05);
+        }
+        
+        .tag-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        
+        .tag {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+        
+        .city {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #64748b;
+            font-weight: 600;
+            font-size: 13px;
+        }
+        
+        .headline {
+            font-size: 22px;
+            font-weight: 700;
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+        
+        .details-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        .details-text {
+            color: #64748b;
+            line-height: 1.7;
+            font-size: 15px;
+            margin-bottom: 24px;
+        }
+        
+        .join-btn {
+            width: 100%;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 20px;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .join-btn:hover {
+            background: #059669;
+        }
+        
+        .side-block {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .creator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .creator-avatar {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            color: #475569;
+            overflow: hidden;
+        }
+        
+        .creator-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .creator-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1e293b;
+            text-decoration: none;
+        }
+        
+        .creator-name:hover {
+            text-decoration: underline;
+        }
+        
+        .creator-age {
+            color: #64748b;
+            font-size: 14px;
+        }
+        
+        .participants {
+            background: #f1f5f9;
+            padding: 12px 14px;
+            border-radius: 12px;
+            font-weight: 600;
+            color: #475569;
+        }
+        
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 14px 20px;
+            border-radius: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <a href="index.html" class="logo">MEETUP</a>
+            <a href="index.html" class="back-link">← К ленте</a>
+        </div>
+        
+        <div class="meeting-layout">
+            <div class="card">
+                <div class="tag-row">
+                    <div id="meeting-tag" class="tag">#Встреча</div>
+                    <div id="meeting-city" class="city">📍 Город</div>
+                </div>
+                <div id="meeting-headline" class="headline">Заголовок встречи</div>
+                
+                <div class="details-title">Подробное описание</div>
+                <div id="meeting-details" class="details-text">Описание встречи появится здесь.</div>
+                
+                <button id="join-button" class="join-btn">Присоединиться к встрече</button>
+            </div>
+            
+            <div class="side-block">
+                <div class="card">
+                    <div class="creator">
+                        <div class="creator-avatar" id="creator-avatar">A</div>
+                        <div>
+                            <a id="creator-name" class="creator-name" href="profile.html">Автор встречи</a>
+                            <div id="creator-age" class="creator-age">Возраст не указан</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card participants" id="participants-info">👥 0/0 участников</div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="notification" class="notification"></div>
+    
+    <script>
+        const TOPICS = [
+            { id: 'boardgames', name: '🎲 Настольные игры', color: '#3b82f6' },
+            { id: 'tennis', name: '🎾 Теннис', color: '#10b981' },
+            { id: 'football', name: '⚽ Футбол', color: '#f97316' },
+            { id: 'running', name: '🏃 Бег', color: '#6366f1' },
+            { id: 'coffee', name: '☕ Кофе', color: '#8b5cf6' },
+            { id: 'cinema', name: '🎬 Кино', color: '#ef4444' },
+            { id: 'language', name: '🗣️ Языковая практика', color: '#14b8a6' },
+            { id: 'hiking', name: '🥾 Походы', color: '#22c55e' },
+            { id: 'music', name: '🎵 Музыка', color: '#eab308' },
+            { id: 'photography', name: '📷 Фотография', color: '#0ea5e9' }
+        ];
+        
+        const DEMO_MEETINGS = [
+            {
+                id: 'demo-1',
+                topic: 'boardgames',
+                title: 'Ищем людей на настолки в субботу — будет лёгкий вечер и новые игры',
+                description: 'Планируем вечер настолок на 3-4 часа. Возьмём пару кооперативов и классические игры. Если хочешь — принеси любимую игру, но это необязательно.',
+                max_slots: 6,
+                participants_count: 2,
+                city: 'Москва, Хамовники',
+                creator: { name: 'Алексей', age: 27, avatar_url: '' }
+            }
+        ];
+        
+        function getMeetingFromStorage(meetingId) {
+            const raw = localStorage.getItem('meetup_meetings');
+            if (!raw) return null;
+            try {
+                const list = JSON.parse(raw);
+                return list.find(item => item.id === meetingId) || null;
+            } catch (error) {
+                return null;
+            }
+        }
+        
+        function renderMeeting(meeting) {
+            const topic = TOPICS.find(item => item.id === meeting.topic) || TOPICS[0];
+            const topicLabel = `#${topic.name.replace(/^(\S+)\s/, '')}`;
+            
+            document.getElementById('meeting-tag').textContent = topicLabel;
+            document.getElementById('meeting-tag').style.background = `${topic.color}20`;
+            document.getElementById('meeting-tag').style.color = topic.color;
+            
+            const cityEl = document.getElementById('meeting-city');
+            if (meeting.city) {
+                cityEl.textContent = `📍 ${meeting.city}`;
+                cityEl.style.display = 'inline-flex';
+            } else {
+                cityEl.style.display = 'none';
+            }
+            document.getElementById('meeting-headline').textContent = meeting.title || 'Без названия';
+            document.getElementById('meeting-details').textContent = meeting.description || 'Подробное описание появится позже.';
+            
+            const creatorName = meeting.creator?.name || 'Автор';
+            const creatorAge = meeting.creator?.age ? `${meeting.creator.age} лет` : 'Возраст не указан';
+            const avatarUrl = meeting.creator?.avatar_url || '';
+            
+            const avatarEl = document.getElementById('creator-avatar');
+            if (avatarUrl) {
+                avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${creatorName}">`;
+            } else {
+                avatarEl.textContent = creatorName[0].toUpperCase();
+            }
+            
+            const creatorLink = document.getElementById('creator-name');
+            creatorLink.textContent = creatorName;
+            creatorLink.href = `profile.html?name=${encodeURIComponent(creatorName)}`;
+            document.getElementById('creator-age').textContent = creatorAge;
+            document.getElementById('participants-info').textContent = `👥 ${meeting.participants_count || 0}/${meeting.max_slots || 0} участников`;
+        }
+        
+        function showNotification(message) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+        
+        const meetingId = new URLSearchParams(window.location.search).get('id');
+        const storedMeeting = meetingId ? getMeetingFromStorage(meetingId) : null;
+        const meeting = storedMeeting || DEMO_MEETINGS.find(item => item.id === meetingId) || DEMO_MEETINGS[0];
+        renderMeeting(meeting);
+        
+        document.getElementById('join-button').addEventListener('click', () => {
+            showNotification('Запрос на участие отправлен');
+        });
+    </script>
+</body>
+</html>

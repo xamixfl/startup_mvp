@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meetup — Регистрация</title>
+    
+    <!-- Supabase -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    
+    <!-- Стили -->
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        body {
+            background: #f8fafc;
+            color: #1e293b;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 500px;
+        }
+        
+        .logo {
+            font-size: 32px;
+            font-weight: 800;
+            color: #3b82f6;
+            text-decoration: none;
+            display: block;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .page-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            position: relative;
+        }
+        
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #e2e8f0;
+            z-index: 1;
+        }
+        
+        .step {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            position: relative;
+            z-index: 2;
+        }
+        
+        .step.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .step.completed {
+            background: #10b981;
+            color: white;
+        }
+        
+        .step-label {
+            position: absolute;
+            top: 35px;
+            font-size: 12px;
+            color: #64748b;
+            white-space: nowrap;
+        }
+        
+        /* Формы */
+        .form-step {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .form-step.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #475569;
+            font-size: 14px;
+        }
+        
+        .form-label .required {
+            color: #ef4444;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .form-input.error {
+            border-color: #ef4444;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .form-select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 16px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .form-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        
+        /* Аватар */
+        .avatar-upload {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .avatar-preview {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: #f1f5f9;
+            margin: 0 auto 15px;
+            overflow: hidden;
+            border: 3px solid #e2e8f0;
+            position: relative;
+            cursor: pointer;
+        }
+        
+        .avatar-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .avatar-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+        }
+        
+        .avatar-placeholder .icon {
+            font-size: 40px;
+            margin-bottom: 5px;
+        }
+        
+        .avatar-upload-text {
+            color: #3b82f6;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        .avatar-upload-text:hover {
+            text-decoration: underline;
+        }
+        
+        /* Категории */
+        .categories-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 480px) {
+            .categories-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .category-checkbox {
+            display: none;
+        }
+        
+        .category-label {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .category-label:hover {
+            border-color: #3b82f6;
+            background: #f8fafc;
+        }
+        
+        .category-checkbox:checked + .category-label {
+            border-color: #3b82f6;
+            background: #dbeafe;
+        }
+        
+        .category-icon {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+        
+        /* Ошибки */
+        .error-message {
+            color: #ef4444;
+            font-size: 14px;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        /* Кнопки */
+        .form-actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+        
+        .btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+        
+        .btn-primary:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+        
+        .btn-secondary:hover {
+            background: #e2e8f0;
+        }
+        
+        /* Уведомления */
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+        
+        .notification.error {
+            background: #ef4444;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        /* Загрузка */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Ссылки */
+        .login-link {
+            text-align: center;
+            margin-top: 20px;
+            color: #64748b;
+            font-size: 14px;
+        }
+        
+        .login-link a {
+            color: #3b82f6;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .login-link a:hover {
+            text-decoration: underline;
+        }
+        
+        /* Подтверждение */
+        .confirmation-message {
+            text-align: center;
+            padding: 40px 20px;
+        }
+        
+        .confirmation-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        
+        .confirmation-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 10px;
+        }
+        
+        .confirmation-text {
+            color: #64748b;
+            line-height: 1.5;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="index.html" class="logo">MEETUP</a>
+        <h1 class="page-title">Создание профиля</h1>
+        
+        <!-- Индикатор шагов -->
+        <div class="step-indicator">
+            <div class="step active" id="step1">
+                1
+                <span class="step-label">Основное</span>
+            </div>
+            <div class="step" id="step2">
+                2
+                <span class="step-label">Интересы</span>
+            </div>
+            <div class="step" id="step3">
+                3
+                <span class="step-label">Фото</span>
+            </div>
+            <div class="step" id="step4">
+                4
+                <span class="step-label">Готово</span>
+            </div>
+        </div>
+        
+        <!-- Шаг 1: Основная информация -->
+        <form id="registration-form">
+            <div class="form-step active" id="step1-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Email <span class="required">*</span></label>
+                        <input type="email" id="email" class="form-input" placeholder="ваш@email.com" required>
+                        <div class="error-message" id="email-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Пароль <span class="required">*</span></label>
+                        <input type="password" id="password" class="form-input" placeholder="не менее 6 символов" required minlength="6">
+                        <div class="error-message" id="password-error"></div>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Имя <span class="required">*</span></label>
+                        <input type="text" id="full-name" class="form-input" placeholder="Как вас зовут?" required>
+                        <div class="error-message" id="name-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Возраст <span class="required">*</span></label>
+                        <input type="number" id="age" class="form-input" min="18" max="100" placeholder="18" required>
+                        <div class="error-message" id="age-error"></div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Пол <span class="required">*</span></label>
+                    <select id="gender" class="form-select" required>
+                        <option value="" disabled selected>Выберите пол</option>
+                        <option value="male">Мужской</option>
+                        <option value="female">Женский</option>
+                        <option value="other">Другой</option>
+                        <option value="prefer-not-to-say">Не указывать</option>
+                    </select>
+                    <div class="error-message" id="gender-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Город / район <span class="required">*</span></label>
+                    <input type="text" id="city" class="form-input" placeholder="Например: Москва, Хамовники" required>
+                    <div class="error-message" id="city-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Уникальный никнейм <span class="required">*</span></label>
+                    <input type="text" id="username" class="form-input" placeholder="например: cool_cat_42" required>
+                    <div class="error-message" id="username-error">
+                        <span id="username-checking" style="color: #3b82f6; display: none;">Проверяем...</span>
+                        <span id="username-available" style="color: #10b981; display: none;">✓ Ник свободен</span>
+                        <span id="username-taken" style="color: #ef4444; display: none;">✗ Ник уже занят</span>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary" id="next-step-1">
+                        Далее
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Шаг 2: Интересы -->
+            <div class="form-step" id="step2-form">
+                <div class="form-group">
+                    <label class="form-label">Выберите интересующие категории <span class="required">*</span></label>
+                    <p style="color: #64748b; font-size: 14px; margin-bottom: 15px;">Отметьте темы, которые вам интересны</p>
+                    
+                    <div class="categories-grid" id="categories-container">
+                        <!-- Категории будут добавлены через JS -->
+                    </div>
+                    <div class="error-message" id="categories-error"></div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="prev-step-2">
+                        Назад
+                    </button>
+                    <button type="button" class="btn btn-primary" id="next-step-2">
+                        Далее
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Шаг 3: Фото профиля -->
+            <div class="form-step" id="step3-form">
+                <div class="avatar-upload">
+                    <div class="avatar-preview" id="avatar-preview">
+                        <div class="avatar-placeholder">
+                            <div class="icon">👤</div>
+                            <div>Фото профиля</div>
+                        </div>
+                    </div>
+                    <input type="file" id="avatar-input" accept="image/*" style="display: none;">
+                    <div class="avatar-upload-text" id="upload-text">Загрузить фото</div>
+                    <div class="error-message" id="avatar-error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Небольшое описание о себе</label>
+                    <textarea id="bio" class="form-input" placeholder="Расскажите немного о себе, своих увлечениях..." rows="4"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="prev-step-3">
+                        Назад
+                    </button>
+                    <button type="button" class="btn btn-primary" id="next-step-3">
+                        Завершить регистрацию
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Шаг 4: Завершение -->
+            <div class="form-step" id="step4-form">
+                <div class="confirmation-message">
+                    <div class="confirmation-icon">✉️</div>
+                    <h2 class="confirmation-title">Почти готово!</h2>
+                    <p class="confirmation-text" id="confirmation-text">
+                        Мы отправили письмо с подтверждением на ваш email.<br>
+                        Пожалуйста, проверьте почту и перейдите по ссылке в письме, чтобы активировать аккаунт.
+                    </p>
+                    <button type="button" class="btn btn-primary" id="go-to-login">
+                        Перейти к входу
+                    </button>
+                </div>
+            </div>
+        </form>
+        
+        <div class="login-link">
+            Уже есть аккаунт? <a href="login.html">Войдите</a>
+        </div>
+    </div>
+    
+    <!-- Уведомление -->
+    <div class="notification" id="notification"></div>
+
+    <!-- Основной скрипт -->
+    <script>
+        // Конфигурация Supabase
+        // Конфигурация Supabase
+        const SUPABASE_URL = 'https://ваш-id.supabase.co';
+        const SUPABASE_KEY = 'ваш-public-key';
+        const IS_DEMO = SUPABASE_URL.includes('ваш-id') || SUPABASE_KEY.includes('ваш-public-key');
+
+        let supabase = null;
+        if (!IS_DEMO) {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        }
+
+        
+        // Текущее состояние
+        let currentStep = 1;
+        let avatarFile = null;
+        let usernameCheckTimeout = null;
+        
+        // Категории (такие же как на главной)
+        const CATEGORIES = [
+            { id: 'boardgames', name: '🎲 Настольные игры', icon: '🎲' },
+            { id: 'tennis', name: '🎾 Теннис', icon: '🎾' },
+            { id: 'football', name: '⚽ Футбол', icon: '⚽' },
+            { id: 'running', name: '🏃 Бег', icon: '🏃' },
+            { id: 'coffee', name: '☕ Кофе', icon: '☕' },
+            { id: 'cinema', name: '🎬 Кино', icon: '🎬' },
+            { id: 'language', name: '🗣️ Языковая практика', icon: '🗣️' },
+            { id: 'hiking', name: '🥾 Походы', icon: '🥾' },
+            { id: 'music', name: '🎵 Музыка', icon: '🎵' },
+            { id: 'photography', name: '📷 Фотография', icon: '📷' }
+        ];
+        
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', () => {
+            initCategories();
+            setupEventListeners();
+        });
+        
+        // Инициализация категорий
+        function initCategories() {
+            const container = document.getElementById('categories-container');
+            CATEGORIES.forEach(category => {
+                const checkboxId = `category-${category.id}`;
+                
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = `
+                    <input type="checkbox" id="${checkboxId}" class="category-checkbox" value="${category.id}">
+                    <label for="${checkboxId}" class="category-label">
+                        <span class="category-icon">${category.icon}</span>
+                        <span>${category.name}</span>
+                    </label>
+                `;
+                
+                container.appendChild(wrapper.firstElementChild);
+            });
+        }
+        
+        // Настройка обработчиков событий
+        function setupEventListeners() {
+            // Проверка никнейма на уникальность
+            document.getElementById('username').addEventListener('input', debounce(checkUsername, 500));
+            
+            // Загрузка аватара
+            document.getElementById('upload-text').addEventListener('click', () => {
+                document.getElementById('avatar-input').click();
+            });
+            
+            document.getElementById('avatar-input').addEventListener('change', handleAvatarUpload);
+            
+            // Навигация по шагам
+            document.getElementById('next-step-1').addEventListener('click', validateStep1);
+            document.getElementById('prev-step-2').addEventListener('click', () => goToStep(1));
+            document.getElementById('next-step-2').addEventListener('click', validateStep2);
+            document.getElementById('prev-step-3').addEventListener('click', () => goToStep(2));
+            document.getElementById('next-step-3').addEventListener('click', validateStep3);
+            document.getElementById('go-to-login').addEventListener('click', () => {
+                window.location.href = 'login.html';
+            });
+        }
+        
+        // Переход к шагу
+        function goToStep(step) {
+            // Скрыть текущий шаг
+            document.querySelectorAll('.form-step').forEach(form => {
+                form.classList.remove('active');
+            });
+            
+            // Обновить индикатор
+            document.querySelectorAll('.step').forEach((stepEl, index) => {
+                stepEl.classList.remove('active');
+                if (index + 1 < step) {
+                    stepEl.classList.add('completed');
+                } else if (index + 1 === step) {
+                    stepEl.classList.add('active');
+                }
+            });
+            
+            // Показать новый шаг
+            document.getElementById(`step${step}-form`).classList.add('active');
+            currentStep = step;
+        }
+        
+        // Валидация шага 1
+        async function validateStep1() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const fullName = document.getElementById('full-name').value.trim();
+            const age = parseInt(document.getElementById('age').value);
+            const gender = document.getElementById('gender').value;
+            const city = document.getElementById('city').value.trim();
+            const username = document.getElementById('username').value.trim();
+            
+            let isValid = true;
+            
+            // Сброс ошибок
+            resetErrors(['email', 'password', 'name', 'age', 'gender', 'city', 'username']);
+            
+            // Валидация email
+            if (!email || !isValidEmail(email)) {
+                showError('email-error', 'Введите корректный email');
+                isValid = false;
+            }
+            
+            // Валидация пароля
+            if (!password || password.length < 6) {
+                showError('password-error', 'Пароль должен быть не менее 6 символов');
+                isValid = false;
+            }
+            
+            // Валидация имени
+            if (!fullName) {
+                showError('name-error', 'Введите ваше имя');
+                isValid = false;
+            }
+            
+            // Валидация возраста
+            if (!age || age < 18 || age > 100) {
+                showError('age-error', 'Возраст должен быть от 18 до 100 лет');
+                isValid = false;
+            }
+            
+            // Валидация пола
+            if (!gender) {
+                showError('gender-error', 'Выберите ваш пол');
+                isValid = false;
+            }
+            
+            // Валидация города
+            if (!city) {
+                showError('city-error', 'Укажите город или район');
+                isValid = false;
+            }
+            
+            // Валидация никнейма
+            if (!username) {
+                showError('username-error', 'Введите никнейм');
+                isValid = false;
+            } else if (username.length < 3) {
+                showError('username-error', 'Никнейм должен быть не менее 3 символов');
+                isValid = false;
+            } else if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+                showError('username-error', 'Только латинские буквы, цифры и подчеркивание');
+                isValid = false;
+            }
+            
+            if (isValid) {
+                // Проверяем, не занят ли никнейм
+                if (IS_DEMO) {
+                    goToStep(2);
+                    return;
+                }
+                const usernameAvailable = await checkUsernameImmediately(username);
+                if (!usernameAvailable) {
+                    showError('username-error', 'Этот никнейм уже занят');
+                    return;
+                }
+                
+                goToStep(2);
+            }
+        }
+        
+        // Валидация шага 2
+        function validateStep2() {
+            const selectedCategories = Array.from(
+                document.querySelectorAll('.category-checkbox:checked')
+            ).map(cb => cb.value);
+            
+            resetErrors(['categories']);
+            
+            if (selectedCategories.length === 0) {
+                showError('categories-error', 'Выберите хотя бы одну категорию');
+                return;
+            }
+            
+            goToStep(3);
+        }
+        
+        // Валидация шага 3 и регистрация
+        async function validateStep3() {
+            if (IS_DEMO) {
+                goToStep(4);
+                return;
+                }
+
+            resetErrors(['avatar']);
+            
+            if (!avatarFile) {
+                showError('avatar-error', 'Загрузите фото профиля');
+                return;
+            }
+            
+            // Показываем загрузку
+            const button = document.getElementById('next-step-3');
+            const originalText = button.textContent;
+            button.innerHTML = '<span class="loading"></span> Регистрируем...';
+            button.disabled = true;
+            
+            try {
+                // Получаем данные из формы
+                const email = document.getElementById('email').value.trim();
+                const password = document.getElementById('password').value;
+                const fullName = document.getElementById('full-name').value.trim();
+                const age = parseInt(document.getElementById('age').value);
+                const gender = document.getElementById('gender').value;
+                const city = document.getElementById('city').value.trim();
+                const username = document.getElementById('username').value.trim();
+                const bio = document.getElementById('bio').value.trim();
+                const selectedCategories = Array.from(
+                    document.querySelectorAll('.category-checkbox:checked')
+                ).map(cb => cb.value);
+                
+                // 1. Регистрация в Supabase Auth
+                const { data: authData, error: authError } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: {
+                            full_name: fullName,
+                            username: username,
+                            age: age,
+                            gender: gender,
+                            city: city
+                        },
+                        emailRedirectTo: `${window.location.origin}/login.html?confirmed=true`
+                    }
+                });
+                
+                if (authError) throw authError;
+                
+                const userId = authData.user.id;
+                
+                // 2. Загрузка аватара в Supabase Storage
+                const avatarPath = `avatars/${userId}/${Date.now()}_${avatarFile.name}`;
+                const { error: uploadError } = await supabase.storage
+                    .from('profiles')
+                    .upload(avatarPath, avatarFile, {
+                        cacheControl: '3600',
+                        upsert: false
+                    });
+                
+                if (uploadError) throw uploadError;
+                
+                // Получаем публичный URL аватара
+                const { data: { publicUrl } } = supabase.storage
+                    .from('profiles')
+                    .getPublicUrl(avatarPath);
+                
+                // 3. Создание профиля в таблице profiles
+                const { error: profileError } = await supabase
+                    .from('profiles')
+                    .insert([{
+                        id: userId,
+                        email: email,
+                        username: username,
+                        full_name: fullName,
+                        age: age,
+                        gender: gender,
+                        city: city,
+                        bio: bio || null,
+                        avatar_url: publicUrl,
+                        interests: selectedCategories,
+                        is_verified: false, // Ждет подтверждения email
+                        created_at: new Date().toISOString()
+                    }]);
+                
+                if (profileError) throw profileError;
+                
+                // 4. Переход к шагу завершения
+                document.getElementById('confirmation-text').innerHTML = `
+                    Мы отправили письмо с подтверждением на <strong>${email}</strong>.<br><br>
+                    Пожалуйста, проверьте почту и перейдите по ссылке в письме, чтобы активировать аккаунт.<br><br>
+                    <small style="color: #94a3b8;">Письмо может попасть в спам</small>
+                `;
+                
+                goToStep(4);
+                
+            } catch (error) {
+                console.error('Ошибка регистрации:', error);
+                showNotification(error.message || 'Ошибка регистрации', 'error');
+            } finally {
+                // Восстанавливаем кнопку
+                button.textContent = originalText;
+                button.disabled = false;
+            }
+        }
+        
+        // Проверка никнейма (с дебаунсом)
+        async function checkUsername() {
+            const username = document.getElementById('username').value.trim();
+            const errorEl = document.getElementById('username-error');
+            
+            if (!username || username.length < 3) {
+                hideUsernameStatus();
+                return;
+            }
+            
+            if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+                showError('username-error', 'Только латинские буквы, цифры и подчеркивание');
+                hideUsernameStatus();
+                return;
+            }
+            
+            // Показываем проверку
+            document.getElementById('username-checking').style.display = 'inline';
+            document.getElementById('username-available').style.display = 'none';
+            document.getElementById('username-taken').style.display = 'none';
+            
+            const isAvailable = await checkUsernameImmediately(username);
+            
+            if (isAvailable) {
+                document.getElementById('username-checking').style.display = 'none';
+                document.getElementById('username-available').style.display = 'inline';
+                errorEl.classList.remove('show');
+            } else {
+                document.getElementById('username-checking').style.display = 'none';
+                document.getElementById('username-taken').style.display = 'inline';
+                errorEl.classList.add('show');
+            }
+        }
+        
+        // Немедленная проверка никнейма
+        async function checkUsernameImmediately(username) {
+            try {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('username')
+                    .eq('username', username)
+                    .maybeSingle();
+                
+                if (error) throw error;
+                
+                // Если данные есть - ник занят
+                return !data;
+            } catch (error) {
+                console.error('Ошибка проверки никнейма:', error);
+                return false;
+            }
+        }
+        
+        // Загрузка аватара
+        function handleAvatarUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            // Проверка типа файла
+            if (!file.type.startsWith('image/')) {
+                showError('avatar-error', 'Выберите изображение');
+                return;
+            }
+            
+            // Проверка размера (макс 5MB)
+            if (file.size > 5 * 1024 * 1024) {
+                showError('avatar-error', 'Изображение должно быть меньше 5MB');
+                return;
+            }
+            
+            avatarFile = file;
+            
+            // Предпросмотр
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const avatarPreview = document.getElementById('avatar-preview');
+                avatarPreview.innerHTML = `<img src="${e.target.result}" alt="Аватар">`;
+                document.getElementById('upload-text').textContent = 'Изменить фото';
+                document.getElementById('avatar-error').classList.remove('show');
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        // Вспомогательные функции
+        function isValidEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        }
+        
+        function showError(elementId, message) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.classList.add('show');
+            document.getElementById(elementId.replace('-error', '')).classList.add('error');
+        }
+        
+        function resetErrors(fields) {
+            fields.forEach(field => {
+                const errorEl = document.getElementById(`${field}-error`);
+                if (errorEl) {
+                    errorEl.classList.remove('show');
+                    errorEl.textContent = '';
+                }
+                const inputEl = document.getElementById(field);
+                if (inputEl) {
+                    inputEl.classList.remove('error');
+                }
+            });
+        }
+        
+        function hideUsernameStatus() {
+            document.getElementById('username-checking').style.display = 'none';
+            document.getElementById('username-available').style.display = 'none';
+            document.getElementById('username-taken').style.display = 'none';
+        }
+        
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 5000);
+        }
+        
+        function debounce(func, wait) {
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(usernameCheckTimeout);
+                    func(...args);
+                };
+                clearTimeout(usernameCheckTimeout);
+                usernameCheckTimeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+</body>
+</html>
