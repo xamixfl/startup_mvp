@@ -14,8 +14,8 @@ const DEMO_PROFILES = [
     id: 'demo-1',
     name: 'Алексей',
     age: 27,
-    city: 'Москва, Хамовники',
-    avatar_url: '',
+    location: 'Москва, Хамовники',
+    photo_URL: '',
     interests: ['boardgames', 'coffee', 'running']
   }
 ];
@@ -56,8 +56,8 @@ function getProfile() {
       id: 'local',
       name: name,
       age: null,
-      city: '',
-      avatar_url: '',
+      location: '',
+      photo_URL: '',
       interests: []
     };
   }
@@ -67,15 +67,15 @@ function getProfile() {
 
 function renderProfile(profile) {
   const avatar = document.getElementById('profile-avatar');
-  if (profile.avatar_url) {
-    avatar.innerHTML = `<img src="${profile.avatar_url}" alt="${profile.name}">`;
+  if (profile.photo_URL) {
+    avatar.innerHTML = `<img src="${profile.photo_URL}" alt="${profile.name}">`;
   } else {
     avatar.textContent = profile.name[0].toUpperCase();
   }
 
   document.getElementById('profile-name').textContent = profile.name || 'Пользователь';
   document.getElementById('profile-meta').textContent = profile.age ? `${profile.age} лет` : 'Возраст не указан';
-  document.getElementById('profile-city').textContent = profile.city || 'Город не указан';
+  document.getElementById('profile-city').textContent = profile.location || 'Город не указан';
 
   const interestsWrap = document.getElementById('profile-interests');
   interestsWrap.innerHTML = '';
@@ -116,9 +116,10 @@ function renderMeetings(profile) {
       <div class="meeting-headline">${meeting.title || 'Без названия'}</div>
       <div class="meeting-info">
         <span>👥 ${meeting.participants_count || 0}/${meeting.max_slots || 0}</span>
-        <span>📍 ${meeting.city || 'Город не указан'}</span>
+        <span>📍 ${meeting.location || 'Город не указан'}</span>
       </div>
     `;
     list.appendChild(item);
   });
 }
+

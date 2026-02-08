@@ -16,11 +16,11 @@ const DEMO_MEETINGS = [
     id: 'demo-1',
     topic: 'boardgames',
     title: 'Ищем людей на настолки в субботу — будет лёгкий вечер и новые игры',
-    description: 'Планируем вечер настолок на 3-4 часа. Возьмём пару кооперативов и классические игры. Если хочешь — принеси любимую игру, но это необязательно.',
+    full_description: 'Планируем вечер настолок на 3-4 часа. Возьмём пару кооперативов и классические игры. Если хочешь — принеси любимую игру, но это необязательно.',
     max_slots: 6,
     participants_count: 2,
-    city: 'Москва, Хамовники',
-    creator: { name: 'Алексей', age: 27, avatar_url: '' }
+    location: 'Москва, Хамовники',
+    creator: { name: 'Алексей', age: 27, photo_URL: '' }
   }
 ];
 
@@ -55,19 +55,19 @@ function renderMeeting(meeting) {
   document.getElementById('meeting-tag').style.color = topic.color;
 
   const cityEl = document.getElementById('meeting-city');
-  if (meeting.city) {
-    cityEl.textContent = `📍 ${meeting.city}`;
+  if (meeting.location) {
+    cityEl.textContent = `📍 ${meeting.location}`;
     cityEl.style.display = 'inline-flex';
   } else {
     cityEl.style.display = 'none';
   }
 
   document.getElementById('meeting-headline').textContent = meeting.title || 'Без названия';
-  document.getElementById('meeting-details').textContent = meeting.description || 'Подробное описание появится позже.';
+  document.getElementById('meeting-details').textContent = meeting.full_description || 'Подробное описание появится позже.';
 
   const creatorName = meeting.creator?.name || 'Автор';
   const creatorAge = meeting.creator?.age ? `${meeting.creator.age} лет` : 'Возраст не указан';
-  const avatarUrl = meeting.creator?.avatar_url || '';
+  const avatarUrl = meeting.creator?.photo_URL || '';
 
   const avatarEl = document.getElementById('creator-avatar');
   if (avatarUrl) {
@@ -92,3 +92,4 @@ function showNotification(message) {
     notification.style.display = 'none';
   }, 3000);
 }
+

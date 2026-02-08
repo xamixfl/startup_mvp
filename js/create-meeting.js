@@ -51,9 +51,9 @@ function handleCreateMeeting(event) {
   const meeting = {
     id: `m_${Date.now()}`,
     title: headline,
-    description: details,
+    full_description: details,
     topic: topic,
-    city: city,
+    location: city,
     max_slots: maxSlots,
     participants_count: 1,
     expires_at: expiresDate.toISOString(),

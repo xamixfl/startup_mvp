@@ -1,4 +1,4 @@
-const { supabase } = window.APP;
+const { supabase, TABLES } = window.APP;
 
 let currentStep = 1;
 let avatarFile = null;
@@ -172,7 +172,6 @@ async function validateStep3() {
     const gender = document.getElementById('gender').value;
     const city = document.getElementById('city').value.trim();
     const username = document.getElementById('username').value.trim();
-    const bio = document.getElementById('bio').value.trim();
     const selectedCategories = Array.from(
       document.querySelectorAll('.category-checkbox:checked')
     ).map(cb => cb.value);
@@ -184,9 +183,9 @@ async function validateStep3() {
         data: {
           full_name: fullName,
           username: username,
-          age: age,
-          gender: gender,
-          city: city
+          age: String(age),
+          sex: gender,
+          location: city
         },
         emailRedirectTo: `${window.location.origin}/login.html?confirmed=true`
       }
@@ -211,19 +210,17 @@ async function validateStep3() {
       .getPublicUrl(avatarPath);
 
     const { error: profileError } = await supabase
-      .from('profiles')
+      .from(TABLES.profiles)
       .insert([{
         id: userId,
         email: email,
         username: username,
         full_name: fullName,
-        age: age,
-        gender: gender,
-        city: city,
-        bio: bio || null,
-        avatar_url: publicUrl,
+        age: String(age),
+        sex: gender,
+        location: city,
+        photo_URL: publicUrl || 'user',
         interests: selectedCategories,
-        is_verified: false,
         created_at: new Date().toISOString()
       }]);
 

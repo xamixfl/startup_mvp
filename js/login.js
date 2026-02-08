@@ -47,17 +47,6 @@ async function handleLogin(e) {
 
     if (error) throw error;
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('is_verified')
-      .eq('id', data.user.id)
-      .single();
-
-    if (!profile?.is_verified) {
-      await supabase.auth.signOut();
-      throw new Error('Подтвердите email перед входом. Проверьте вашу почту.');
-    }
-
     window.location.href = 'index.html';
   } catch (error) {
     console.error('Ошибка входа:', error);

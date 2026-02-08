@@ -1,4 +1,4 @@
-const { supabase } = window.APP;
+const { supabase, TABLES } = window.APP;
 
 let currentUser = null;
 
@@ -104,11 +104,11 @@ async function loadMeetings() {
 
   try {
     const { data: meetings, error } = await supabase
-      .from('meetings')
+      .from(TABLES.meetings)
       .select(`
         *,
-        participants(count),
-        creator:profiles(email, full_name, age, avatar_url)
+        ${TABLES.participants}(count),
+        creator:profiles(email, full_name, age, photo_URL)
       `)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false });
@@ -153,10 +153,10 @@ function renderMeetings(meetings) {
 
   meetings.forEach(meeting => {
     const topic = TOPICS.find(t => t.id === meeting.topic) || TOPICS[TOPICS.length - 1];
-    const participantsCount = meeting.participants?.[0]?.count || meeting.participants_count || 0;
+    const participantsCount = meeting[TABLES.participants]?.[0]?.count || meeting.participants_count || 0;
     const creatorName = meeting.creator?.full_name || meeting.creator?.name || meeting.creator?.email?.split('@')[0] || 'Автор';
     const creatorAge = meeting.creator?.age ? `${meeting.creator.age} лет` : '';
-    const creatorAvatar = meeting.creator?.avatar_url || '';
+    const creatorAvatar = meeting.creator?.photo_URL || meeting.creator?.avatar_url || '';
     const topicLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
 
     const meetingCard = document.createElement('div');
@@ -228,7 +228,7 @@ async function joinMeeting(meetingId) {
     }
 
     const { data: existing } = await supabase
-      .from('participants')
+      .from(TABLES.participants)
       .select('id')
       .eq('meeting_id', meetingId)
       .eq('user_id', currentUser.id)
@@ -240,7 +240,7 @@ async function joinMeeting(meetingId) {
     }
 
     const { error: participantError } = await supabase
-      .from('participants')
+      .from(TABLES.participants)
       .insert([{ meeting_id: meetingId, user_id: currentUser.id }]);
 
     if (participantError) throw participantError;

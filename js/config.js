@@ -10,5 +10,10 @@ const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 window.APP = {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
-  supabase
+  supabase,
+  TABLES: {
+    profiles: 'profiles',
+    meetings: 'meetings',
+    participants: 'table-connector'
+  }
 };
