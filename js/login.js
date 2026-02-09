@@ -1,4 +1,4 @@
-const { supabase } = window.APP;
+const supabaseClient = window.APP.supabase;
 
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
@@ -40,7 +40,7 @@ async function handleLogin(e) {
   button.disabled = true;
 
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
       email,
       password
     });
@@ -65,7 +65,7 @@ async function handleLogin(e) {
 }
 
 async function signInWithGoogle() {
-  const { error } = await supabase.auth.signInWithOAuth({
+  const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: `${window.location.origin}/index.html`
@@ -81,7 +81,7 @@ async function resetPassword() {
   const email = prompt('Введите ваш email для сброса пароля:');
   if (!email) return;
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
     redirectTo: `${window.location.origin}/reset-password.html`
   });
 

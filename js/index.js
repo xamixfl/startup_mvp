@@ -1,6 +1,10 @@
-const { supabase, TABLES } = window.APP;
+const supabaseClient = window.APP.supabase;
+const { TABLES } = window.APP;
 
 let currentUser = null;
+let allMeetings = [];
+let currentProfile = null;
+const DEFAULT_AVATAR = 'assets/default-avatar.svg';
 
 const TOPICS = [
   { id: 'boardgames', name: '🎲 Настольные игры', color: '#8b5cf6' },
@@ -13,17 +17,6 @@ const TOPICS = [
   { id: 'other', name: '🎭 Другое', color: '#64748b' }
 ];
 
-const DEMO_MEETINGS = [
-  {
-    id: 'demo-1',
-    title: 'Ищем пару человек на вечер настолок — спокойно и без спешки',
-    description: 'Будем играть в пару кооперативов и знакомиться. Можно прийти одному.',
-    topic: 'boardgames',
-    max_slots: 6,
-    participants_count: 2,
-    creator: { name: 'Алексей', age: 27, avatar_url: '' }
-  }
-];
 
 document.addEventListener('DOMContentLoaded', async () => {
   await initApp();
@@ -32,19 +25,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function initApp() {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await supabaseClient.auth.getUser();
 
   if (user) {
     currentUser = user;
+    currentProfile = await fetchProfile(user.id);
     updateUserUI(user);
   }
 
-  supabase.auth.onAuthStateChange((event, session) => {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
     if (session?.user) {
       currentUser = session.user;
+      fetchProfile(session.user.id).then(profile => {
+        currentProfile = profile;
+        updateUserUI(session.user);
+      });
       updateUserUI(session.user);
     } else {
       currentUser = null;
+      currentProfile = null;
       updateUserUI(null);
     }
   });
@@ -56,26 +55,43 @@ function updateUserUI(user) {
   const authButton = document.getElementById('auth-button');
   const userName = document.getElementById('user-name');
   const userAvatar = document.getElementById('user-avatar');
+  const createBtn = document.getElementById('create-meeting-btn');
 
   if (user) {
     authButton.textContent = 'Выйти';
     authButton.href = '#';
     authButton.onclick = (event) => {
       event.preventDefault();
-      supabase.auth.signOut();
+      supabaseClient.auth.signOut();
     };
 
-    const letter = user.email?.[0]?.toUpperCase() || 'U';
-    userAvatar.textContent = letter;
+    const avatarUrl = currentProfile?.photo_URL && currentProfile?.photo_URL !== 'user'
+      ? currentProfile.photo_URL
+      : DEFAULT_AVATAR;
+    userAvatar.innerHTML = `<img src="${avatarUrl}" alt="${userName.textContent}">`;
     userAvatar.className = 'user-avatar authenticated';
-    userName.textContent = user.email?.split('@')[0] || 'Пользователь';
+    userName.textContent = currentProfile?.username || user.email?.split('@')[0] || 'Пользователь';
+    if (createBtn) createBtn.href = 'create-meeting.html';
+    userName.style.cursor = 'pointer';
+    userAvatar.style.cursor = 'pointer';
+    userName.onclick = () => {
+      window.location.href = `profile.html?id=${user.id}`;
+    };
+    userAvatar.onclick = () => {
+      window.location.href = `profile.html?id=${user.id}`;
+    };
   } else {
     authButton.textContent = 'Войти';
     authButton.href = 'login.html';
     authButton.onclick = null;
-    userAvatar.textContent = '👤';
+    userAvatar.innerHTML = `<img src="${DEFAULT_AVATAR}" alt="Гость">`;
     userAvatar.className = 'user-avatar';
     userName.textContent = 'Гость';
+    if (createBtn) createBtn.href = 'login.html';
+    userName.style.cursor = 'default';
+    userAvatar.style.cursor = 'default';
+    userName.onclick = null;
+    userAvatar.onclick = null;
   }
 }
 
@@ -103,39 +119,34 @@ async function loadMeetings() {
   feed.innerHTML = '<div class="loading">Загрузка встреч...</div>';
 
   try {
-    const { data: meetings, error } = await supabase
+    const { data: meetings, error } = await supabaseClient
       .from(TABLES.meetings)
-      .select(`
-        *,
-        ${TABLES.participants}(count),
-        creator:profiles(email, full_name, age, photo_URL)
-      `)
+      .select('*')
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
     if (!meetings || meetings.length === 0) {
+      allMeetings = [];
       renderEmptyState();
     } else {
-      renderMeetings(meetings);
+      const meetingsWithCreators = await attachCreators(meetings);
+      allMeetings = meetingsWithCreators;
+      renderMeetings(meetingsWithCreators);
     }
   } catch (error) {
     console.error('Ошибка загрузки встреч:', error);
-    const localMeetings = getLocalMeetings();
-    if (localMeetings.length > 0) {
-      renderMeetings(localMeetings);
-      return;
-    }
-    renderMeetings(DEMO_MEETINGS);
+    allMeetings = [];
+    renderEmptyState();
   }
 }
 
-function renderEmptyState() {
+function renderEmptyState(message = 'Активных встреч пока нет') {
   const feed = document.getElementById('meetings-feed');
   feed.innerHTML = `
     <div class="empty-state">
-      <h3 class="empty-state-title">Активных встреч пока нет</h3>
+      <h3 class="empty-state-title">${message}</h3>
       <p class="empty-state-description">
         Будьте первым, кто создаст встречу!<br>
         Соберите компанию для игры, спорта или просто общения.
@@ -153,10 +164,12 @@ function renderMeetings(meetings) {
 
   meetings.forEach(meeting => {
     const topic = TOPICS.find(t => t.id === meeting.topic) || TOPICS[TOPICS.length - 1];
-    const participantsCount = meeting[TABLES.participants]?.[0]?.count || meeting.participants_count || 0;
-    const creatorName = meeting.creator?.full_name || meeting.creator?.name || meeting.creator?.email?.split('@')[0] || 'Автор';
+    const participantsCount = meeting.current_slots || 0;
+    const creatorName = meeting.creator?.full_name || meeting.creator?.email?.split('@')[0] || 'Автор';
     const creatorAge = meeting.creator?.age ? `${meeting.creator.age} лет` : '';
-    const creatorAvatar = meeting.creator?.photo_URL || meeting.creator?.avatar_url || '';
+    const creatorAvatar = meeting.creator?.photo_URL && meeting.creator?.photo_URL !== 'user'
+      ? meeting.creator.photo_URL
+      : DEFAULT_AVATAR;
     const topicLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
 
     const meetingCard = document.createElement('div');
@@ -171,7 +184,7 @@ function renderMeetings(meetings) {
         <div class="participants-pill">👥 ${participantsCount}/${meeting.max_slots}</div>
         <div class="creator-block">
           <div class="creator-avatar">
-            ${creatorAvatar ? `<img src="${creatorAvatar}" alt="${creatorName}">` : creatorName[0].toUpperCase()}
+            <img src="${creatorAvatar}" alt="${creatorName}">
           </div>
           <div>
             <div class="creator-name">${creatorName}</div>
@@ -185,7 +198,30 @@ function renderMeetings(meetings) {
   });
 }
 
+async function attachCreators(meetings) {
+  const creatorIds = Array.from(new Set(meetings.map(m => m.creator_id).filter(Boolean)));
+  if (creatorIds.length === 0) {
+    return meetings.map(m => ({ ...m, creator: null }));
+  }
+
+  const { data: profiles, error } = await supabaseClient
+    .from(TABLES.profiles)
+    .select('id, full_name, age, photo_URL, email')
+    .in('id', creatorIds);
+
+  if (error || !profiles) {
+    return meetings.map(m => ({ ...m, creator: null }));
+  }
+
+  const byId = new Map(profiles.map(p => [p.id, p]));
+  return meetings.map(m => ({ ...m, creator: byId.get(m.creator_id) || null }));
+}
+
 function showCreateModal() {
+  if (!currentUser) {
+    window.location.href = 'login.html';
+    return;
+  }
   window.location.href = 'create-meeting.html';
 }
 
@@ -200,8 +236,21 @@ function filterMeetings(topicId) {
   });
 
   event.target.classList.add('active');
-  const topicName = topicId === 'all' ? 'Все встречи' : TOPICS.find(t => t.id === topicId)?.name;
-  showNotification(`Фильтр: ${topicName}`);
+  if (topicId === 'all') {
+    if (allMeetings.length === 0) {
+      renderEmptyState();
+    } else {
+      renderMeetings(allMeetings);
+    }
+    return;
+  }
+
+  const filtered = allMeetings.filter(meeting => meeting.topic === topicId);
+  if (filtered.length === 0) {
+    renderEmptyState('Встречи не найдены');
+  } else {
+    renderMeetings(filtered);
+  }
 }
 
 async function joinMeeting(meetingId) {
@@ -211,7 +260,7 @@ async function joinMeeting(meetingId) {
   }
 
   try {
-    const { data: meeting } = await supabase
+    const { data: meeting } = await supabaseClient
       .from('meetings')
       .select('current_slots, max_slots')
       .eq('id', meetingId)
@@ -227,7 +276,7 @@ async function joinMeeting(meetingId) {
       return;
     }
 
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseClient
       .from(TABLES.participants)
       .select('id')
       .eq('meeting_id', meetingId)
@@ -239,13 +288,13 @@ async function joinMeeting(meetingId) {
       return;
     }
 
-    const { error: participantError } = await supabase
+    const { error: participantError } = await supabaseClient
       .from(TABLES.participants)
       .insert([{ meeting_id: meetingId, user_id: currentUser.id }]);
 
     if (participantError) throw participantError;
 
-    const { error: meetingError } = await supabase
+    const { error: meetingError } = await supabaseClient
       .from('meetings')
       .update({ current_slots: meeting.current_slots + 1 })
       .eq('id', meetingId);
@@ -282,6 +331,24 @@ function getLocalMeetings() {
   }
 }
 
+function setupEventListeners() {
+  // no-op for now
+}
+
 window.showCreateModal = showCreateModal;
 window.joinMeeting = joinMeeting;
 window.filterMeetings = filterMeetings;
+
+async function fetchProfile(userId) {
+  try {
+    const { data } = await supabaseClient
+      .from(TABLES.profiles)
+      .select('id, username, full_name, age, photo_URL, email')
+      .eq('id', userId)
+      .single();
+    return data || null;
+  } catch (error) {
+    console.error('Ошибка загрузки профиля:', error);
+    return null;
+  }
+}

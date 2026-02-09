@@ -1,7 +1,21 @@
+const supabaseClient = window.APP?.supabase;
+const { TABLES } = window.APP || {};
+
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('create-meeting.js loaded');
+  checkAuthOrRedirect();
   setExpirationLimits();
   document.getElementById('create-meeting-form').addEventListener('submit', handleCreateMeeting);
 });
+
+async function checkAuthOrRedirect() {
+  const supabaseClient = window.APP?.supabase;
+  if (!supabaseClient) return;
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) {
+    window.location.href = 'login.html';
+  }
+}
 
 function showNotification(message) {
   const notification = document.getElementById('notification');
@@ -12,15 +26,13 @@ function showNotification(message) {
   }, 3000);
 }
 
-function saveMeeting(meeting) {
-  const raw = localStorage.getItem('meetup_meetings');
-  const list = raw ? JSON.parse(raw) : [];
-  list.unshift(meeting);
-  localStorage.setItem('meetup_meetings', JSON.stringify(list));
-}
-
 function handleCreateMeeting(event) {
   event.preventDefault();
+  if (!supabaseClient) {
+    showNotification('Supabase не подключен');
+    console.error('Supabase client missing in create-meeting.js');
+    return;
+  }
 
   const headline = document.getElementById('meeting-headline').value.trim();
   const topic = document.getElementById('meeting-topic').value;
@@ -48,28 +60,51 @@ function handleCreateMeeting(event) {
     return;
   }
 
-  const meeting = {
-    id: `m_${Date.now()}`,
+  createMeetingInDb({
     title: headline,
     full_description: details,
     topic: topic,
     location: city,
     max_slots: maxSlots,
-    participants_count: 1,
-    expires_at: expiresDate.toISOString(),
-    creator: {
-      name: 'Вы',
-      age: null,
-      avatar_url: ''
+    expires_at: expiresDate.toISOString()
+  });
+}
+
+async function createMeetingInDb(payload) {
+  if (!supabaseClient) return;
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) {
+    window.location.href = 'login.html';
+    return;
+  }
+
+  try {
+    const { data, error } = await supabaseClient
+      .from(TABLES.meetings)
+      .insert([{
+        ...payload,
+        creator_id: user.id,
+        current_slots: 1
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    if (TABLES?.participants) {
+      await supabaseClient
+        .from(TABLES.participants)
+        .insert([{ meeting_id: data.id, user_id: user.id }]);
     }
-  };
 
-  saveMeeting(meeting);
-  showNotification('Встреча опубликована');
-
-  setTimeout(() => {
-    window.location.href = `meeting.html?id=${meeting.id}`;
-  }, 600);
+    showNotification('Встреча опубликована');
+    setTimeout(() => {
+      window.location.href = `meeting.html?id=${data.id}`;
+    }, 600);
+  } catch (error) {
+    console.error('Ошибка создания встречи:', error);
+    showNotification(error.message || 'Ошибка создания встречи');
+  }
 }
 
 function setExpirationLimits() {

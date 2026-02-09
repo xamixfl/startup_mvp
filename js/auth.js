@@ -1,20 +1,22 @@
-const { supabase, TABLES } = window.APP;
+const app = window.APP;
+const supabaseClient = app.supabase;
+const { TABLES } = app;
 
 let currentStep = 1;
 let avatarFile = null;
 let usernameCheckTimeout = null;
 
 const CATEGORIES = [
-  { id: 'boardgames', name: '🎲 Настольные игры', icon: '🎲' },
-  { id: 'tennis', name: '🎾 Теннис', icon: '🎾' },
-  { id: 'football', name: '⚽ Футбол', icon: '⚽' },
-  { id: 'running', name: '🏃 Бег', icon: '🏃' },
-  { id: 'coffee', name: '☕ Кофе', icon: '☕' },
-  { id: 'cinema', name: '🎬 Кино', icon: '🎬' },
-  { id: 'language', name: '🗣️ Языковая практика', icon: '🗣️' },
-  { id: 'hiking', name: '🥾 Походы', icon: '🥾' },
-  { id: 'music', name: '🎵 Музыка', icon: '🎵' },
-  { id: 'photography', name: '📷 Фотография', icon: '📷' }
+  { id: 'boardgames', name: 'Настольные игры', icon: '🎲' },
+  { id: 'tennis', name: 'Теннис', icon: '🎾' },
+  { id: 'football', name: 'Футбол', icon: '⚽' },
+  { id: 'running', name: 'Бег', icon: '🏃' },
+  { id: 'coffee', name: 'Кофе', icon: '☕' },
+  { id: 'cinema', name: 'Кино', icon: '🎬' },
+  { id: 'language', name: 'Языковая практика', icon: '🗣️' },
+  { id: 'hiking', name: 'Походы', icon: '🥾' },
+  { id: 'music', name: 'Музыка', icon: '🎵' },
+  { id: 'photography', name: 'Фотография', icon: '📷' }
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -24,6 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initCategories() {
   const container = document.getElementById('categories-container');
+  if (!container) return;
+  container.innerHTML = '';
   CATEGORIES.forEach(category => {
     const checkboxId = `category-${category.id}`;
     const wrapper = document.createElement('div');
@@ -34,7 +38,7 @@ function initCategories() {
         <span>${category.name}</span>
       </label>
     `;
-    container.appendChild(wrapper.firstElementChild);
+    container.appendChild(wrapper);
   });
 }
 
@@ -154,11 +158,6 @@ function validateStep2() {
 async function validateStep3() {
   resetErrors(['avatar']);
 
-  if (!avatarFile) {
-    showError('avatar-error', 'Загрузите фото профиля');
-    return;
-  }
-
   const button = document.getElementById('next-step-3');
   const originalText = button.textContent;
   button.innerHTML = '<span class="loading"></span> Регистрируем...';
@@ -176,7 +175,7 @@ async function validateStep3() {
       document.querySelectorAll('.category-checkbox:checked')
     ).map(cb => cb.value);
 
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    const { data: authData, error: authError } = await supabaseClient.auth.signUp({
       email,
       password,
       options: {
@@ -195,21 +194,25 @@ async function validateStep3() {
 
     const userId = authData.user.id;
 
-    const avatarPath = `avatars/${userId}/${Date.now()}_${avatarFile.name}`;
-    const { error: uploadError } = await supabase.storage
-      .from('profiles')
-      .upload(avatarPath, avatarFile, {
-        cacheControl: '3600',
-        upsert: false
-      });
+    let publicUrl = 'user';
+    if (avatarFile) {
+      const avatarPath = `avatars/${userId}/${Date.now()}_${avatarFile.name}`;
+      const { error: uploadError } = await supabaseClient.storage
+        .from('profiles')
+        .upload(avatarPath, avatarFile, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
-    if (uploadError) throw uploadError;
+      if (uploadError) throw uploadError;
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('profiles')
-      .getPublicUrl(avatarPath);
+      const { data } = supabaseClient.storage
+        .from('profiles')
+        .getPublicUrl(avatarPath);
+      publicUrl = data?.publicUrl || 'user';
+    }
 
-    const { error: profileError } = await supabase
+    const { error: profileError } = await supabaseClient
       .from(TABLES.profiles)
       .insert([{
         id: userId,
@@ -220,8 +223,7 @@ async function validateStep3() {
         sex: gender,
         location: city,
         photo_URL: publicUrl || 'user',
-        interests: selectedCategories,
-        created_at: new Date().toISOString()
+        interests: selectedCategories
       }]);
 
     if (profileError) throw profileError;
@@ -235,7 +237,15 @@ async function validateStep3() {
     goToStep(4);
   } catch (error) {
     console.error('Ошибка регистрации:', error);
-    showNotification(error.message || 'Ошибка регистрации', 'error');
+    if (error?.message?.includes('User already registered')) {
+      showNotification('Этот email уже зарегистрирован. Войдите в аккаунт.', 'error');
+      const loginLink = document.querySelector('.login-link a');
+      if (loginLink) {
+        loginLink.textContent = 'Войти в аккаунт';
+      }
+    } else {
+      showNotification(error.message || 'Ошибка регистрации', 'error');
+    }
   } finally {
     button.textContent = originalText;
     button.disabled = false;
@@ -257,26 +267,29 @@ async function checkUsername() {
     return;
   }
 
-  document.getElementById('username-checking').style.display = 'inline';
-  document.getElementById('username-available').style.display = 'none';
-  document.getElementById('username-taken').style.display = 'none';
+  const checkingEl = document.getElementById('username-checking');
+  const availableEl = document.getElementById('username-available');
+  const takenEl = document.getElementById('username-taken');
+  if (checkingEl) checkingEl.style.display = 'inline';
+  if (availableEl) availableEl.style.display = 'none';
+  if (takenEl) takenEl.style.display = 'none';
 
   const isAvailable = await checkUsernameImmediately(username);
 
+  if (checkingEl) checkingEl.style.display = 'none';
+
   if (isAvailable) {
-    document.getElementById('username-checking').style.display = 'none';
-    document.getElementById('username-available').style.display = 'inline';
-    errorEl.classList.remove('show');
+    if (availableEl) availableEl.style.display = 'inline';
+    if (errorEl) errorEl.classList.remove('show');
   } else {
-    document.getElementById('username-checking').style.display = 'none';
-    document.getElementById('username-taken').style.display = 'inline';
-    errorEl.classList.add('show');
+    if (takenEl) takenEl.style.display = 'inline';
+    if (errorEl) errorEl.classList.add('show');
   }
 }
 
 async function checkUsernameImmediately(username) {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
       .from('profiles')
       .select('username')
       .eq('username', username)
@@ -286,7 +299,8 @@ async function checkUsernameImmediately(username) {
     return !data;
   } catch (error) {
     console.error('Ошибка проверки никнейма:', error);
-    return false;
+    // Если проверка недоступна (например, из-за RLS), не блокируем регистрацию
+    return true;
   }
 }
 
@@ -322,9 +336,13 @@ function isValidEmail(email) {
 
 function showError(elementId, message) {
   const element = document.getElementById(elementId);
+  if (!element) return;
   element.textContent = message;
   element.classList.add('show');
-  document.getElementById(elementId.replace('-error', '')).classList.add('error');
+  const inputEl = document.getElementById(elementId.replace('-error', ''));
+  if (inputEl) {
+    inputEl.classList.add('error');
+  }
 }
 
 function resetErrors(fields) {
@@ -342,9 +360,12 @@ function resetErrors(fields) {
 }
 
 function hideUsernameStatus() {
-  document.getElementById('username-checking').style.display = 'none';
-  document.getElementById('username-available').style.display = 'none';
-  document.getElementById('username-taken').style.display = 'none';
+  const checkingEl = document.getElementById('username-checking');
+  const availableEl = document.getElementById('username-available');
+  const takenEl = document.getElementById('username-taken');
+  if (checkingEl) checkingEl.style.display = 'none';
+  if (availableEl) availableEl.style.display = 'none';
+  if (takenEl) takenEl.style.display = 'none';
 }
 
 function showNotification(message, type = 'success') {

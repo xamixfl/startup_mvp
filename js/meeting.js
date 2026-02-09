@@ -1,3 +1,7 @@
+const supabaseClient = window.APP?.supabase;
+const { TABLES } = window.APP || {};
+const DEFAULT_AVATAR = 'assets/default-avatar.svg';
+
 const TOPICS = [
   { id: 'boardgames', name: '🎲 Настольные игры', color: '#3b82f6' },
   { id: 'tennis', name: '🎾 Теннис', color: '#10b981' },
@@ -11,23 +15,16 @@ const TOPICS = [
   { id: 'photography', name: '📷 Фотография', color: '#0ea5e9' }
 ];
 
-const DEMO_MEETINGS = [
-  {
-    id: 'demo-1',
-    topic: 'boardgames',
-    title: 'Ищем людей на настолки в субботу — будет лёгкий вечер и новые игры',
-    full_description: 'Планируем вечер настолок на 3-4 часа. Возьмём пару кооперативов и классические игры. Если хочешь — принеси любимую игру, но это необязательно.',
-    max_slots: 6,
-    participants_count: 2,
-    location: 'Москва, Хамовники',
-    creator: { name: 'Алексей', age: 27, photo_URL: '' }
-  }
-];
-
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const meetingId = new URLSearchParams(window.location.search).get('id');
   const storedMeeting = meetingId ? getMeetingFromStorage(meetingId) : null;
-  const meeting = storedMeeting || DEMO_MEETINGS.find(item => item.id === meetingId) || DEMO_MEETINGS[0];
+  const meeting = storedMeeting || (await fetchMeeting(meetingId));
+
+  if (!meeting) {
+    showNotification('Встреча не найдена');
+    return;
+  }
+
   renderMeeting(meeting);
 
   document.getElementById('join-button').addEventListener('click', () => {
@@ -65,23 +62,54 @@ function renderMeeting(meeting) {
   document.getElementById('meeting-headline').textContent = meeting.title || 'Без названия';
   document.getElementById('meeting-details').textContent = meeting.full_description || 'Подробное описание появится позже.';
 
-  const creatorName = meeting.creator?.name || 'Автор';
+  const creatorName = meeting.creator?.full_name || meeting.creator?.username || 'Автор';
   const creatorAge = meeting.creator?.age ? `${meeting.creator.age} лет` : 'Возраст не указан';
-  const avatarUrl = meeting.creator?.photo_URL || '';
+  const avatarUrl = meeting.creator?.photo_URL && meeting.creator?.photo_URL !== 'user'
+    ? meeting.creator.photo_URL
+    : DEFAULT_AVATAR;
 
   const avatarEl = document.getElementById('creator-avatar');
-  if (avatarUrl) {
-    avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${creatorName}">`;
-  } else {
-    avatarEl.textContent = creatorName[0].toUpperCase();
-  }
+  avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${creatorName}">`;
 
   const creatorLink = document.getElementById('creator-name');
   creatorLink.textContent = creatorName;
-  creatorLink.href = `profile.html?name=${encodeURIComponent(creatorName)}`;
+  if (meeting.creator?.id) {
+    creatorLink.href = `profile.html?id=${meeting.creator.id}`;
+  } else {
+    creatorLink.href = '#';
+  }
 
   document.getElementById('creator-age').textContent = creatorAge;
-  document.getElementById('participants-info').textContent = `👥 ${meeting.participants_count || 0}/${meeting.max_slots || 0} участников`;
+  const currentSlots = meeting.current_slots || meeting.participants_count || 0;
+  document.getElementById('participants-info').textContent = `👥 ${currentSlots}/${meeting.max_slots || 0} участников`;
+}
+
+async function fetchMeeting(meetingId) {
+  if (!supabaseClient || !meetingId) return null;
+  try {
+    const { data: meeting, error } = await supabaseClient
+      .from(TABLES.meetings)
+      .select('*')
+      .eq('id', meetingId)
+      .single();
+
+    if (error) throw error;
+    if (!meeting) return null;
+
+    if (meeting.creator_id) {
+      const { data: creator } = await supabaseClient
+        .from(TABLES.profiles)
+        .select('id, username, full_name, age, photo_URL')
+        .eq('id', meeting.creator_id)
+        .single();
+      return { ...meeting, creator };
+    }
+
+    return meeting;
+  } catch (error) {
+    console.error('Ошибка загрузки встречи:', error);
+    return null;
+  }
 }
 
 function showNotification(message) {

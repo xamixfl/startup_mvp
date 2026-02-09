@@ -9,22 +9,27 @@ const TOPICS = [
   { id: 'other', name: '🎭 Другое', color: '#64748b' }
 ];
 
-const DEMO_PROFILES = [
-  {
-    id: 'demo-1',
-    name: 'Алексей',
-    age: 27,
-    location: 'Москва, Хамовники',
-    photo_URL: '',
-    interests: ['boardgames', 'coffee', 'running']
-  }
-];
+document.addEventListener('DOMContentLoaded', async () => {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get('id');
+  const name = params.get('name');
 
-document.addEventListener('DOMContentLoaded', () => {
-  const profile = getProfile();
+  if (!id && !name) {
+    renderEmptyProfile();
+    return;
+  }
+
+  const profile = await fetchProfile(id, name);
+  if (!profile) {
+    renderEmptyProfile();
+    return;
+  }
+
   renderProfile(profile);
   renderMeetings(profile);
 });
+
+const DEFAULT_AVATAR = 'assets/default-avatar.svg';
 
 function getLocalMeetings() {
   const raw = localStorage.getItem('meetup_meetings');
@@ -37,43 +42,47 @@ function getLocalMeetings() {
   }
 }
 
-function getProfile() {
-  const params = new URLSearchParams(window.location.search);
-  const name = params.get('name');
-  const id = params.get('id');
+async function fetchProfile(id, name) {
+  const supabaseClient = window.APP?.supabase;
+  if (!supabaseClient) return null;
 
-  let profile = null;
-  if (id) {
-    profile = DEMO_PROFILES.find(item => item.id === id) || null;
+  try {
+    if (id) {
+      const { data, error } = await supabaseClient
+        .from('profiles')
+        .select('id, username, full_name, age, sex, location, photo_URL, interests')
+        .eq('id', id)
+        .single();
+      if (error) throw error;
+      return data;
+    }
+
+    if (name) {
+      const { data, error } = await supabaseClient
+        .from('profiles')
+        .select('id, username, full_name, age, sex, location, photo_URL, interests')
+        .eq('username', name)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+  } catch (error) {
+    console.error('Ошибка загрузки профиля:', error);
+    return null;
   }
 
-  if (!profile && name) {
-    profile = DEMO_PROFILES.find(item => item.name === name) || null;
-  }
-
-  if (!profile && name) {
-    return {
-      id: 'local',
-      name: name,
-      age: null,
-      location: '',
-      photo_URL: '',
-      interests: []
-    };
-  }
-
-  return profile || DEMO_PROFILES[0];
+  return null;
 }
 
 function renderProfile(profile) {
   const avatar = document.getElementById('profile-avatar');
-  if (profile.photo_URL) {
-    avatar.innerHTML = `<img src="${profile.photo_URL}" alt="${profile.name}">`;
-  } else {
-    avatar.textContent = profile.name[0].toUpperCase();
-  }
+  const displayName = profile.full_name || profile.username || 'Пользователь';
+  const avatarUrl = profile.photo_URL && profile.photo_URL !== 'user'
+    ? profile.photo_URL
+    : DEFAULT_AVATAR;
+  avatar.innerHTML = `<img src="${avatarUrl}" alt="${displayName}">`;
 
-  document.getElementById('profile-name').textContent = profile.name || 'Пользователь';
+  document.getElementById('profile-name').textContent = displayName;
   document.getElementById('profile-meta').textContent = profile.age ? `${profile.age} лет` : 'Возраст не указан';
   document.getElementById('profile-city').textContent = profile.location || 'Город не указан';
 
@@ -83,43 +92,95 @@ function renderProfile(profile) {
     const topic = TOPICS.find(item => item.id === id);
     const pill = document.createElement('div');
     pill.className = 'interest-pill';
-    pill.textContent = topic ? topic.name : id;
+    pill.textContent = topic ? topic.name : normalizeInterestLabel(id);
     interestsWrap.appendChild(pill);
   });
+}
+
+function normalizeInterestLabel(id) {
+  const fallbackMap = {
+    boardgames: '🎲 Настольные игры',
+    tennis: '🎾 Теннис',
+    football: '⚽ Футбол',
+    running: '🏃 Бег',
+    coffee: '☕ Кофе',
+    cinema: '🎬 Кино',
+    language: '🗣️ Языковая практика',
+    hiking: '🥾 Походы',
+    music: '🎵 Музыка',
+    photography: '📷 Фотография'
+  };
+
+  if (fallbackMap[id]) return fallbackMap[id];
+  return id;
 }
 
 function renderMeetings(profile) {
   const list = document.getElementById('meeting-list');
   list.innerHTML = '';
 
-  const meetings = getLocalMeetings().filter(meeting => {
-    return meeting.creator?.name && meeting.creator.name === profile.name;
-  });
+  fetchMeetingsForProfile(profile, list);
+}
 
-  if (meetings.length === 0) {
-    const empty = document.createElement('div');
-    empty.style.color = '#94a3b8';
-    empty.textContent = 'Пока нет запланированных встреч';
-    list.appendChild(empty);
+function renderEmptyProfile() {
+  document.getElementById('profile-name').textContent = 'Профиль не найден';
+  document.getElementById('profile-meta').textContent = '';
+  document.getElementById('profile-city').textContent = '';
+  document.getElementById('profile-interests').innerHTML = '';
+  const list = document.getElementById('meeting-list');
+  list.innerHTML = '';
+  const empty = document.createElement('div');
+  empty.style.color = '#94a3b8';
+  empty.textContent = 'Нет данных профиля';
+  list.appendChild(empty);
+}
+
+async function fetchMeetingsForProfile(profile, list) {
+  const supabaseClient = window.APP?.supabase;
+  if (!supabaseClient || !profile?.id) {
+    renderMeetingsEmpty(list);
     return;
   }
 
-  meetings.forEach(meeting => {
-    const topic = TOPICS.find(item => item.id === meeting.topic) || TOPICS[TOPICS.length - 1];
-    const item = document.createElement('div');
-    item.className = 'meeting-item';
-    item.onclick = () => {
-      window.location.href = `meeting.html?id=${meeting.id}`;
-    };
-    item.innerHTML = `
-      <div class="meeting-tag">#${topic.name.replace(/^(\S+)\s/, '')}</div>
-      <div class="meeting-headline">${meeting.title || 'Без названия'}</div>
-      <div class="meeting-info">
-        <span>👥 ${meeting.participants_count || 0}/${meeting.max_slots || 0}</span>
-        <span>📍 ${meeting.location || 'Город не указан'}</span>
-      </div>
-    `;
-    list.appendChild(item);
-  });
+  try {
+    const { data, error } = await supabaseClient
+      .from('meetings')
+      .select('id, title, topic, location, max_slots, current_slots')
+      .eq('creator_id', profile.id)
+      .order('created_at', { ascending: false });
+
+    if (error || !data || data.length === 0) {
+      renderMeetingsEmpty(list);
+      return;
+    }
+
+    data.forEach(meeting => {
+      const topic = TOPICS.find(item => item.id === meeting.topic) || TOPICS[TOPICS.length - 1];
+      const item = document.createElement('div');
+      item.className = 'meeting-item';
+      item.onclick = () => {
+        window.location.href = `meeting.html?id=${meeting.id}`;
+      };
+      item.innerHTML = `
+        <div class="meeting-tag">#${topic.name.replace(/^(\S+)\s/, '')}</div>
+        <div class="meeting-headline">${meeting.title || 'Без названия'}</div>
+        <div class="meeting-info">
+          <span>👥 ${meeting.current_slots || 0}/${meeting.max_slots || 0}</span>
+          <span>📍 ${meeting.location || 'Город не указан'}</span>
+        </div>
+      `;
+      list.appendChild(item);
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки встреч профиля:', error);
+    renderMeetingsEmpty(list);
+  }
+}
+
+function renderMeetingsEmpty(list) {
+  const empty = document.createElement('div');
+  empty.style.color = '#94a3b8';
+  empty.textContent = 'Пока нет запланированных встреч';
+  list.appendChild(empty);
 }
 
