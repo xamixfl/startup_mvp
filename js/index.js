@@ -1,4 +1,4 @@
-const supabaseClient = window.APP.supabase;
+﻿const supabaseClient = window.APP.supabase;
 const { TABLES } = window.APP;
 
 let currentUser = null;

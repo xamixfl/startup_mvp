@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 
 <head>
@@ -13,7 +13,6 @@
     <!-- Supabase -->
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
-    <!-- Стили -->
     <style>
         * {
             margin: 0;
@@ -30,7 +29,6 @@
             padding: 20px;
         }
 
-        /* Хедер */
         .header {
             display: flex;
             justify-content: space-between;
@@ -375,6 +373,11 @@
             font-weight: 600;
             color: #1e293b;
             font-size: 14px;
+            text-decoration: none;
+        }
+
+        .creator-name:hover {
+            text-decoration: underline;
         }
 
         .creator-age {
@@ -604,7 +607,7 @@
 
             <div class="filter-section" tabindex="0">
                 <div class="filter-trigger">
-                    <h3>Критерии</h3>
+                    <h3>Категории</h3>
                     <span class="filter-current">Все категории</span>
                 </div>
                 <ul class="filter-menu" id="filter-tags">
@@ -708,3 +711,4 @@
 </body>
 
 </html>
+
