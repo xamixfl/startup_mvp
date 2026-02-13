@@ -6,19 +6,16 @@ let allMeetings = [];
 let currentProfile = null;
 const DEFAULT_AVATAR = 'assets/default-avatar.svg';
 
-const TOPICS = [
-  { id: 'boardgames', name: '🎲 Настольные игры', color: '#8b5cf6' },
-  { id: 'tennis', name: '🎾 Теннис', color: '#10b981' },
-  { id: 'football', name: '⚽ Футбол', color: '#ef4444' },
-  { id: 'running', name: '🏃 Бег', color: '#3b82f6' },
-  { id: 'coffee', name: '☕ Кофе', color: '#f59e0b' },
-  { id: 'cinema', name: '🎬 Кино', color: '#ec4899' },
-  { id: 'language', name: '🗣️ Языковая практика', color: '#06b6d4' },
-  { id: 'other', name: '🎭 Другое', color: '#64748b' }
-];
+// Topics and cities will be fetched from database
+let TOPICS = [];
 
+const selectedTopics = new Set();
+const selectedCities = new Set();
+let allCities = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
+  TOPICS = await window.fetchTopics();
+  populateTopicDropdown();
   await initApp();
   await loadMeetings();
   setupEventListeners();
@@ -49,6 +46,8 @@ async function initApp() {
   });
 
   loadFilters();
+  await loadCitiesFromDatabase();
+  loadCityFilters();
 }
 
 function updateUserUI(user) {
@@ -97,21 +96,185 @@ function updateUserUI(user) {
 
 function loadFilters() {
   const container = document.getElementById('filter-tags');
+  if (!container) return;
+  
   container.innerHTML = '';
+  
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Поиск тем...';
+  searchInput.className = 'topic-search-input';
+  searchInput.style.display = 'block';
+  searchInput.style.marginBottom = '8px';
+  searchInput.addEventListener('input', (e) => filterTopicList(e.target.value));
+  container.appendChild(searchInput);
 
+  const allItem = document.createElement('li');
   const allButton = document.createElement('button');
   allButton.className = 'filter-tag active';
-  allButton.textContent = 'Все встречи';
-  allButton.onclick = () => filterMeetings('all');
-  container.appendChild(allButton);
+  allButton.textContent = 'Все категории';
+  allButton.onclick = (event) => filterMeetings('all', event);
+  allItem.appendChild(allButton);
+  container.appendChild(allItem);
 
   TOPICS.forEach(topic => {
+    const item = document.createElement('li');
     const button = document.createElement('button');
     button.className = 'filter-tag';
     button.textContent = topic.name;
-    button.onclick = () => filterMeetings(topic.id);
-    container.appendChild(button);
+    button.setAttribute('data-topic-id', topic.id);
+    button.onclick = (event) => filterMeetings(topic.id, event);
+    item.appendChild(button);
+    container.appendChild(item);
   });
+
+  updateFilterLabel();
+}
+
+function filterTopicList(searchTerm) {
+  const container = document.getElementById('filter-tags');
+  const items = container.querySelectorAll('li');
+  
+  items.forEach(item => {
+    const button = item.querySelector('.filter-tag');
+    if (button.textContent === 'Все категории') {
+      item.style.display = 'list-item';
+    } else {
+      const matches = button.textContent.toLowerCase().includes(searchTerm.toLowerCase());
+      item.style.display = matches ? 'list-item' : 'none';
+    }
+  });
+}
+
+function populateTopicDropdown() {
+  const select = document.getElementById('meeting-topic');
+  if (!select) return;
+  
+  // Clear existing options except the first one (placeholder)
+  while (select.options.length > 1) {
+    select.remove(1);
+  }
+  
+  TOPICS.forEach(topic => {
+    const option = document.createElement('option');
+    option.value = topic.id;
+    option.textContent = topic.name;
+    select.appendChild(option);
+  });
+}
+
+function loadCityFilters() {
+  const container = document.getElementById('city-filter-list');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Поиск города...';
+  searchInput.className = 'city-search-input';
+  searchInput.addEventListener('input', (e) => filterCityList(e.target.value));
+  container.appendChild(searchInput);
+
+  const citiesList = document.createElement('ul');
+  citiesList.id = 'cities-list';
+  citiesList.style.marginTop = '8px';
+  citiesList.style.listStyle = 'none';
+  
+  const allItem = document.createElement('li');
+  const allButton = document.createElement('button');
+  allButton.className = 'filter-tag active';
+  allButton.textContent = 'Все города';
+  allButton.onclick = (event) => filterByCity('all', event);
+  allItem.appendChild(allButton);
+  citiesList.appendChild(allItem);
+
+  const uniqueCities = Array.from(new Set(allCities))
+    .filter(Boolean)
+    .sort();
+
+  uniqueCities.forEach(city => {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.className = 'filter-tag city-option';
+    button.textContent = city;
+    button.setAttribute('data-city', city);
+    button.onclick = (event) => filterByCity(city, event);
+    item.appendChild(button);
+    citiesList.appendChild(item);
+  });
+
+  container.appendChild(citiesList);
+  updateCityLabel();
+}
+
+function filterCityList(searchTerm) {
+  const listItems = document.querySelectorAll('.city-option');
+  const term = searchTerm.toLowerCase();
+  
+  listItems.forEach(item => {
+    const cityName = item.getAttribute('data-city').toLowerCase();
+    if (cityName.includes(term)) {
+      item.parentElement.style.display = '';
+    } else {
+      item.parentElement.style.display = 'none';
+    }
+  });
+}
+
+function filterByCity(city, event) {
+  if (city === 'all') {
+    selectedCities.clear();
+    setActiveCityButton('all');
+    updateCityLabel();
+    renderFilteredMeetings();
+    return;
+  }
+
+  const allButton = document.querySelector('#city-filter-list .filter-tag');
+  if (allButton) allButton.classList.remove('active');
+
+  if (selectedCities.has(city)) {
+    selectedCities.delete(city);
+  } else {
+    selectedCities.add(city);
+  }
+
+  if (selectedCities.size === 0) {
+    setActiveCityButton('all');
+  } else if (event?.target) {
+    event.target.classList.toggle('active');
+  }
+
+  updateCityLabel();
+  renderFilteredMeetings();
+}
+
+function setActiveCityButton(city) {
+  document.querySelectorAll('#city-filter-list .filter-tag').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  if (city === 'all') {
+    const allButton = document.querySelector('#city-filter-list .filter-tag:first-of-type');
+    if (allButton) allButton.classList.add('active');
+  }
+}
+
+function updateCityLabel() {
+  const label = document.querySelector('.city-filter-current');
+  if (!label) return;
+
+  if (selectedCities.size === 0) {
+    label.textContent = 'Все города';
+    return;
+  }
+
+  const cities = Array.from(selectedCities);
+  if (cities.length <= 2) {
+    label.textContent = cities.join(', ');
+  } else {
+    label.textContent = `${cities.slice(0, 2).join(', ')} +${cities.length - 2}`;
+  }
 }
 
 async function loadMeetings() {
@@ -129,11 +292,13 @@ async function loadMeetings() {
 
     if (!meetings || meetings.length === 0) {
       allMeetings = [];
+      await loadCitiesFromDatabase();
       renderEmptyState();
     } else {
       const meetingsWithCreators = await attachCreators(meetings);
       allMeetings = meetingsWithCreators;
-      renderMeetings(meetingsWithCreators);
+      await loadCitiesFromDatabase();
+      renderFilteredMeetings();
     }
   } catch (error) {
     console.error('Ошибка загрузки встреч:', error);
@@ -230,26 +395,144 @@ function hideCreateModal() {
   document.getElementById('meeting-form').reset();
 }
 
-function filterMeetings(topicId) {
-  document.querySelectorAll('.filter-tag').forEach(btn => {
-    btn.classList.remove('active');
-  });
-
-  event.target.classList.add('active');
+function filterMeetings(topicId, event) {
   if (topicId === 'all') {
-    if (allMeetings.length === 0) {
-      renderEmptyState();
-    } else {
-      renderMeetings(allMeetings);
-    }
+    selectedTopics.clear();
+    setActiveFilterButton('all');
+    updateFilterLabel();
+    renderFilteredMeetings();
     return;
   }
 
-  const filtered = allMeetings.filter(meeting => meeting.topic === topicId);
+  const allButton = document.querySelector('#filter-tags .filter-tag');
+  if (allButton) allButton.classList.remove('active');
+
+  if (selectedTopics.has(topicId)) {
+    selectedTopics.delete(topicId);
+  } else {
+    selectedTopics.add(topicId);
+  }
+
+  if (selectedTopics.size === 0) {
+    setActiveFilterButton('all');
+  } else if (event?.target) {
+    event.target.classList.toggle('active');
+  }
+
+  updateFilterLabel();
+  renderFilteredMeetings();
+}
+
+function setActiveFilterButton(topicId) {
+  document.querySelectorAll('#filter-tags .filter-tag').forEach(btn => {
+    btn.classList.remove('active');
+  });
+
+  if (topicId === 'all') {
+    const allButton = document.querySelector('#filter-tags .filter-tag:first-of-type');
+    if (allButton) allButton.classList.add('active');
+    return;
+  }
+
+  const topic = TOPICS.find(t => t.id === topicId);
+  if (!topic) return;
+  document.querySelectorAll('#filter-tags .filter-tag').forEach(btn => {
+    if (btn.textContent === topic.name) {
+      btn.classList.add('active');
+    }
+  });
+}
+
+async function loadCitiesFromDatabase() {
+  const citiesSet = new Set();
+
+  try {
+    // Load cities from meetings
+    const { data: meetings, error: meetingsError } = await supabaseClient
+      .from(TABLES.meetings)
+      .select('location');
+
+    if (!meetingsError && meetings) {
+      meetings.forEach(m => {
+        if (m.location) {
+          const parts = m.location.split(',');
+          let city = parts[parts.length - 1].trim();
+          if (city && city.length > 0) {
+            city = city.charAt(0).toUpperCase() + city.slice(1);
+            citiesSet.add(city);
+          }
+        }
+      });
+    }
+
+    // Load cities from profiles
+    const { data: profiles, error: profilesError } = await supabaseClient
+      .from(TABLES.profiles)
+      .select('location');
+
+    if (!profilesError && profiles) {
+      profiles.forEach(p => {
+        if (p.location) {
+          const parts = p.location.split(',');
+          let city = parts[parts.length - 1].trim();
+          if (city && city.length > 0) {
+            city = city.charAt(0).toUpperCase() + city.slice(1);
+            citiesSet.add(city);
+          }
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Ошибка загрузки городов:', error);
+  }
+
+  allCities = Array.from(citiesSet).sort();
+  loadCityFilters();
+}
+
+function renderFilteredMeetings() {
+  let filtered = allMeetings;
+
+  // Filter by topics
+  if (selectedTopics.size > 0) {
+    filtered = filtered.filter(meeting => selectedTopics.has(meeting.topic));
+  }
+
+  // Filter by cities
+  if (selectedCities.size > 0) {
+    filtered = filtered.filter(meeting => {
+      if (!meeting.location) return false;
+      const parts = meeting.location.split(',');
+      let city = parts[parts.length - 1].trim();
+      // Capitalize first letter to match BASE_CITIES format
+      city = city.charAt(0).toUpperCase() + city.slice(1);
+      return selectedCities.has(city);
+    });
+  }
+
   if (filtered.length === 0) {
     renderEmptyState('Встречи не найдены');
   } else {
     renderMeetings(filtered);
+  }
+}
+
+function updateFilterLabel() {
+  const label = document.querySelector('.filter-current');
+  if (!label) return;
+
+  if (selectedTopics.size === 0) {
+    label.textContent = 'Все категории';
+    return;
+  }
+
+  const names = TOPICS.filter(topic => selectedTopics.has(topic.id))
+    .map(topic => topic.name.replace(/^\S+\s/, ''));
+
+  if (names.length <= 2) {
+    label.textContent = names.join(', ');
+  } else {
+    label.textContent = `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
   }
 }
 

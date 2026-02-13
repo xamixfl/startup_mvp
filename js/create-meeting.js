@@ -1,12 +1,26 @@
 const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   console.log('create-meeting.js loaded');
+  await populateTopicDropdown();
   checkAuthOrRedirect();
   setExpirationLimits();
   document.getElementById('create-meeting-form').addEventListener('submit', handleCreateMeeting);
 });
+
+async function populateTopicDropdown() {
+  const select = document.getElementById('meeting-topic');
+  if (!select || !window.fetchTopics) return;
+  
+  const topics = await window.fetchTopics();
+  topics.forEach(topic => {
+    const option = document.createElement('option');
+    option.value = topic.id;
+    option.textContent = topic.name;
+    select.appendChild(option);
+  });
+}
 
 async function checkAuthOrRedirect() {
   const supabaseClient = window.APP?.supabase;
@@ -95,6 +109,11 @@ async function createMeetingInDb(payload) {
       await supabaseClient
         .from(TABLES.participants)
         .insert([{ meeting_id: data.id, user_id: user.id }]);
+    }
+
+    // Automatically add city to cities table
+    if (payload.location && window.addCity) {
+      await window.addCity(payload.location);
     }
 
     showNotification('Встреча опубликована');

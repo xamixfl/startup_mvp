@@ -1,15 +1,8 @@
-const TOPICS = [
-  { id: 'boardgames', name: '🎲 Настольные игры', color: '#8b5cf6' },
-  { id: 'tennis', name: '🎾 Теннис', color: '#10b981' },
-  { id: 'football', name: '⚽ Футбол', color: '#ef4444' },
-  { id: 'running', name: '🏃 Бег', color: '#3b82f6' },
-  { id: 'coffee', name: '☕ Кофе', color: '#f59e0b' },
-  { id: 'cinema', name: '🎬 Кино', color: '#ec4899' },
-  { id: 'language', name: '🗣️ Языковая практика', color: '#06b6d4' },
-  { id: 'other', name: '🎭 Другое', color: '#64748b' }
-];
+// Topics will be fetched from database
+let TOPICS = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
+  TOPICS = await window.fetchTopics();
   const params = new URLSearchParams(window.location.search);
   const id = params.get('id');
   const name = params.get('name');

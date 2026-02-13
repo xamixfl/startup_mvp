@@ -6,20 +6,11 @@ let currentStep = 1;
 let avatarFile = null;
 let usernameCheckTimeout = null;
 
-const CATEGORIES = [
-  { id: 'boardgames', name: 'Настольные игры', icon: '🎲' },
-  { id: 'tennis', name: 'Теннис', icon: '🎾' },
-  { id: 'football', name: 'Футбол', icon: '⚽' },
-  { id: 'running', name: 'Бег', icon: '🏃' },
-  { id: 'coffee', name: 'Кофе', icon: '☕' },
-  { id: 'cinema', name: 'Кино', icon: '🎬' },
-  { id: 'language', name: 'Языковая практика', icon: '🗣️' },
-  { id: 'hiking', name: 'Походы', icon: '🥾' },
-  { id: 'music', name: 'Музыка', icon: '🎵' },
-  { id: 'photography', name: 'Фотография', icon: '📷' }
-];
+// Categories will be fetched from database
+let CATEGORIES = [];
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  CATEGORIES = await window.fetchTopics();
   initCategories();
   setupEventListeners();
 });
@@ -31,11 +22,23 @@ function initCategories() {
   CATEGORIES.forEach(category => {
     const checkboxId = `category-${category.id}`;
     const wrapper = document.createElement('div');
+    
+    // Extract icon from name if not separate (e.g., "🎲 Настольные игры" -> icon: "🎲", name: "Настольные игры")
+    let icon = category.icon || '';
+    let displayName = category.name;
+    if (!icon && category.name) {
+      const emojiMatch = category.name.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}])\s*/u);
+      if (emojiMatch) {
+        icon = emojiMatch[0].trim();
+        displayName = category.name.substring(emojiMatch[0].length).trim();
+      }
+    }
+    
     wrapper.innerHTML = `
       <input type="checkbox" id="${checkboxId}" class="category-checkbox" value="${category.id}">
       <label for="${checkboxId}" class="category-label">
-        <span class="category-icon">${category.icon}</span>
-        <span>${category.name}</span>
+        <span class="category-icon">${icon}</span>
+        <span>${displayName}</span>
       </label>
     `;
     container.appendChild(wrapper);
@@ -227,6 +230,11 @@ async function validateStep3() {
       }]);
 
     if (profileError) throw profileError;
+
+    // Automatically add city to cities table
+    if (city && window.addCity) {
+      await window.addCity(city);
+    }
 
     document.getElementById('confirmation-text').innerHTML = `
       Мы отправили письмо с подтверждением на <strong>${email}</strong>.<br><br>

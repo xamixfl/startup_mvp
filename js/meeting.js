@@ -2,20 +2,11 @@ const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
 const DEFAULT_AVATAR = 'assets/default-avatar.svg';
 
-const TOPICS = [
-  { id: 'boardgames', name: '🎲 Настольные игры', color: '#3b82f6' },
-  { id: 'tennis', name: '🎾 Теннис', color: '#10b981' },
-  { id: 'football', name: '⚽ Футбол', color: '#f97316' },
-  { id: 'running', name: '🏃 Бег', color: '#6366f1' },
-  { id: 'coffee', name: '☕ Кофе', color: '#8b5cf6' },
-  { id: 'cinema', name: '🎬 Кино', color: '#ef4444' },
-  { id: 'language', name: '🗣️ Языковая практика', color: '#14b8a6' },
-  { id: 'hiking', name: '🥾 Походы', color: '#22c55e' },
-  { id: 'music', name: '🎵 Музыка', color: '#eab308' },
-  { id: 'photography', name: '📷 Фотография', color: '#0ea5e9' }
-];
+// Topics will be fetched from database
+let TOPICS = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
+  TOPICS = await window.fetchTopics();
   const meetingId = new URLSearchParams(window.location.search).get('id');
   const storedMeeting = meetingId ? getMeetingFromStorage(meetingId) : null;
   const meeting = storedMeeting || (await fetchMeeting(meetingId));

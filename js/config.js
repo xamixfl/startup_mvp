@@ -12,7 +12,9 @@ window.APP = {
   TABLES: {
     profiles: 'profiles',
     meetings: 'meetings',
-    participants: 'table-connector'
+    participants: 'table-connector',
+    cities: 'cities',
+    topics: 'topics'
   }
 };
 

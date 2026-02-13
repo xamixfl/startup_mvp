@@ -1,17 +1,18 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meetup — спонтанные встречи</title>
-    
+
     <!-- PWA мета-теги -->
     <meta name="theme-color" content="#3b82f6">
     <link rel="manifest" href="/manifest.json">
-    
+
     <!-- Supabase -->
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    
+
     <!-- Стили -->
     <style>
         * {
@@ -20,7 +21,7 @@
             box-sizing: border-box;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        
+
         body {
             background: #f8fafc;
             color: #1e293b;
@@ -28,7 +29,7 @@
             margin: 0 auto;
             padding: 20px;
         }
-        
+
         /* Хедер */
         .header {
             display: flex;
@@ -38,20 +39,20 @@
             border-bottom: 2px solid #e2e8f0;
             margin-bottom: 30px;
         }
-        
+
         .logo {
             font-size: 28px;
             font-weight: 800;
             color: #3b82f6;
             text-decoration: none;
         }
-        
+
         .user-section {
             display: flex;
             align-items: center;
             gap: 15px;
         }
-        
+
         .user-avatar {
             width: 36px;
             height: 36px;
@@ -67,41 +68,41 @@
             overflow: hidden;
             flex-shrink: 0;
         }
-        
+
         .user-avatar.authenticated {
             background: #3b82f6;
             color: white;
             border-color: #3b82f6;
         }
-        
+
         .user-avatar img {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-        
+
         /* Основная сетка */
         .main-grid {
             display: grid;
             grid-template-columns: 300px 1fr;
             gap: 30px;
         }
-        
+
         @media (max-width: 768px) {
             .main-grid {
                 grid-template-columns: 1fr;
             }
         }
-        
+
         /* Боковая панель */
         .sidebar {
             background: white;
             border-radius: 16px;
             padding: 25px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
             height: fit-content;
         }
-        
+
         .btn-create {
             background: #3b82f6;
             color: white;
@@ -115,61 +116,165 @@
             transition: background 0.2s;
             margin-bottom: 20px;
         }
-        
+
         .btn-create:hover {
             background: #2563eb;
         }
-        
+
+        .btn-header {
+            margin: 0;
+            padding: 10px 20px;
+            width: auto;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-link {
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .filter-section {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
         .filter-section h3 {
-            margin-bottom: 15px;
             font-size: 16px;
             color: #64748b;
         }
-        
-        .filter-tags {
+
+        .filter-trigger {
             display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            cursor: default;
         }
-        
+
+        .filter-current {
+            font-size: 13px;
+            color: #1e293b;
+            background: #f1f5f9;
+            padding: 6px 10px;
+            border-radius: 999px;
+        }
+
+        .city-filter-current {
+            font-size: 13px;
+            color: #1e293b;
+            background: #f1f5f9;
+            padding: 6px 10px;
+            border-radius: 999px;
+        }
+
+        .filter-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 8px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 220px;
+            overflow-y: auto;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-6px);
+            transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+            z-index: 10;
+        }
+
+        .city-search-input,
+        .topic-search-input {
+            padding: 8px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 13px;
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 6px;
+        }
+
+        .city-search-input:focus,
+        .topic-search-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .filter-menu li {
+            list-style: none;
+        }
+
+        .filter-section:hover .filter-menu,
+        .filter-section:focus-within .filter-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
         .filter-tag {
             background: #f1f5f9;
             border: none;
             padding: 8px 14px;
-            border-radius: 20px;
+            border-radius: 10px;
             font-size: 14px;
             cursor: pointer;
             transition: all 0.2s;
+            width: 100%;
+            text-align: left;
         }
-        
+
         .filter-tag.active {
             background: #3b82f6;
             color: white;
         }
-        
+
+        .sidebar-divider {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .sidebar-note {
+            font-size: 14px;
+            color: #64748b;
+            line-height: 1.6;
+        }
+
         /* Лента встреч */
         .meetings-feed {
             display: flex;
             flex-direction: column;
             gap: 20px;
         }
-        
+
         .meeting-card {
             background: white;
             border-radius: 16px;
             padding: 25px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
             border: 1px solid #e2e8f0;
             transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
             cursor: pointer;
         }
-        
+
         .meeting-card:hover {
             transform: translateY(-2px);
             border-color: #3b82f6;
             box-shadow: 0 10px 24px rgba(59, 130, 246, 0.08);
         }
-        
+
         .meeting-tag {
             background: #dbeafe;
             color: #1d4ed8;
@@ -180,7 +285,7 @@
             display: inline-block;
             margin-bottom: 14px;
         }
-        
+
         .meeting-thread {
             color: #1e293b;
             font-size: 18px;
@@ -188,7 +293,7 @@
             line-height: 1.5;
             margin-bottom: 18px;
         }
-        
+
         .meeting-meta {
             display: flex;
             justify-content: space-between;
@@ -196,7 +301,7 @@
             gap: 16px;
             flex-wrap: wrap;
         }
-        
+
         .participants-pill {
             display: flex;
             align-items: center;
@@ -208,13 +313,13 @@
             font-weight: 600;
             font-size: 14px;
         }
-        
+
         .creator-block {
             display: flex;
             align-items: center;
             gap: 10px;
         }
-        
+
         .creator-avatar {
             width: 36px;
             height: 36px;
@@ -227,24 +332,24 @@
             color: #475569;
             overflow: hidden;
         }
-        
+
         .creator-avatar img {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-        
+
         .creator-name {
             font-weight: 600;
             color: #1e293b;
             font-size: 14px;
         }
-        
+
         .creator-age {
             color: #64748b;
             font-size: 12px;
         }
-        
+
         /* Уведомления */
         .notification {
             position: fixed;
@@ -254,11 +359,11 @@
             color: white;
             padding: 16px 24px;
             border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
             display: none;
             z-index: 1000;
         }
-        
+
         /* Модальное окно */
         .modal-overlay {
             display: none;
@@ -267,12 +372,12 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             z-index: 2000;
             justify-content: center;
             align-items: center;
         }
-        
+
         .modal-content {
             background: white;
             border-radius: 20px;
@@ -282,13 +387,13 @@
             max-height: 90vh;
             overflow-y: auto;
         }
-        
+
         .modal-title {
             margin-bottom: 20px;
             font-size: 24px;
             color: #1e293b;
         }
-        
+
         .modal-close {
             position: absolute;
             top: 15px;
@@ -299,7 +404,7 @@
             cursor: pointer;
             color: #64748b;
         }
-        
+
         /* Формы */
         .form-group {
             display: flex;
@@ -307,26 +412,26 @@
             gap: 8px;
             margin-bottom: 16px;
         }
-        
+
         .form-label {
             font-size: 14px;
             font-weight: 600;
             color: #475569;
         }
-        
+
         .form-input {
             padding: 12px;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
             font-size: 16px;
         }
-        
+
         .form-input:focus {
             outline: none;
             border-color: #3b82f6;
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
-        
+
         .form-select {
             padding: 12px;
             border: 1px solid #e2e8f0;
@@ -335,7 +440,7 @@
             background: white;
             cursor: pointer;
         }
-        
+
         .form-textarea {
             padding: 12px;
             border: 1px solid #e2e8f0;
@@ -345,19 +450,19 @@
             resize: vertical;
             min-height: 100px;
         }
-        
+
         .form-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
         }
-        
+
         .form-actions {
             display: flex;
             gap: 12px;
             margin-top: 20px;
         }
-        
+
         .btn-primary {
             flex: 1;
             background: #3b82f6;
@@ -369,11 +474,11 @@
             cursor: pointer;
             transition: background 0.2s;
         }
-        
+
         .btn-primary:hover {
             background: #2563eb;
         }
-        
+
         .btn-secondary {
             background: #f1f5f9;
             color: #64748b;
@@ -384,11 +489,11 @@
             cursor: pointer;
             transition: background 0.2s;
         }
-        
+
         .btn-secondary:hover {
             background: #e2e8f0;
         }
-        
+
         /* Адаптивность */
         @media (max-width: 768px) {
             .header {
@@ -396,35 +501,35 @@
                 gap: 15px;
                 text-align: center;
             }
-            
+
             .meeting-details {
                 flex-direction: column;
                 gap: 10px;
             }
-            
+
             .form-row {
                 grid-template-columns: 1fr;
             }
         }
-        
+
         /* Состояние "нет встреч" */
         .empty-state {
             text-align: center;
             padding: 60px 20px;
         }
-        
+
         .empty-state-title {
             margin-bottom: 16px;
             color: #64748b;
             font-size: 20px;
         }
-        
+
         .empty-state-description {
             color: #94a3b8;
             margin-bottom: 24px;
             line-height: 1.5;
         }
-        
+
         /* Загрузка */
         .loading {
             text-align: center;
@@ -432,7 +537,7 @@
             color: #64748b;
             font-size: 16px;
         }
-        
+
         .error {
             text-align: center;
             padding: 40px;
@@ -443,6 +548,7 @@
         }
     </style>
 </head>
+
 <body>
     <!-- Хедер -->
     <header class="header">
@@ -450,7 +556,7 @@
         <div class="user-section">
             <span id="user-name">Гость</span>
             <div id="user-avatar" class="user-avatar">👤</div>
-            <a id="auth-button" class="btn-create" style="margin: 0; padding: 10px 20px; text-decoration: none; display: inline-flex; align-items: center; justify-content: center;" href="login.html">
+            <a id="auth-button" class="btn-create btn-header" href="login.html">
                 Войти
             </a>
         </div>
@@ -460,19 +566,32 @@
     <div class="main-grid">
         <!-- Боковая панель -->
         <aside class="sidebar">
-            <a id="create-meeting-btn" class="btn-create" href="create-meeting.html" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">
+            <a id="create-meeting-btn" class="btn-create btn-link" href="create-meeting.html">
                 + Создать встречу
             </a>
-            
-            <div class="filter-section">
-                <h3>Категории</h3>
-                <div class="filter-tags" id="filter-tags">
-                    <!-- Фильтры будут добавлены через JS -->
+
+            <div class="filter-section" tabindex="0">
+                <div class="filter-trigger">
+                    <h3>Критерии</h3>
+                    <span class="filter-current">Все категории</span>
                 </div>
+                <ul class="filter-menu" id="filter-tags">
+                    <!-- Фильтры будут добавлены через JS -->
+                </ul>
             </div>
             
-            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
-                <p style="font-size: 14px; color: #64748b; line-height: 1.6;">
+            <div class="filter-section" tabindex="0">
+                <div class="filter-trigger">
+                    <h3>Города</h3>
+                    <span class="city-filter-current">Все города</span>
+                </div>
+                <div class="filter-menu" id="city-filter-list" style="flex-direction: column;">
+                    <!-- Города и поиск будут добавлены через JS -->
+                </div>
+            </div>
+
+            <div class="sidebar-divider">
+                <p class="sidebar-note">
                     <strong>Как это работает:</strong><br>
                     1. Создай встречу<br>
                     2. Жди участников<br>
@@ -499,40 +618,37 @@
             <form id="meeting-form">
                 <div class="form-group">
                     <label class="form-label" for="meeting-title">Название встречи *</label>
-                    <input type="text" id="meeting-title" class="form-input" placeholder="Например: Игра в мафию" required>
+                    <input type="text" id="meeting-title" class="form-input" placeholder="Например: Игра в мафию"
+                        required>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label" for="meeting-topic">Тема встречи *</label>
                     <select id="meeting-topic" class="form-select" required>
                         <option value="" disabled selected>-- Выберите тему --</option>
-                        <option value="boardgames">🎲 Настольные игры</option>
-                        <option value="tennis">🎾 Теннис</option>
-                        <option value="football">⚽ Футбол</option>
-                        <option value="running">🏃 Бег</option>
-                        <option value="coffee">☕ Кофе</option>
-                        <option value="cinema">🎬 Кино</option>
-                        <option value="language">🗣️ Языковая практика</option>
-                        <option value="other">🎭 Другое</option>
                     </select>
                 </div>
-                
+                </div>
+
                 <div class="form-group">
                     <label class="form-label" for="meeting-description">Описание</label>
-                    <textarea id="meeting-description" class="form-textarea" placeholder="Опишите встречу: что будете делать, какие правила, что взять с собой..."></textarea>
+                    <textarea id="meeting-description" class="form-textarea"
+                        placeholder="Опишите встречу: что будете делать, какие правила, что взять с собой..."></textarea>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label" for="meeting-location">Место встречи *</label>
-                    <input type="text" id="meeting-location" class="form-input" placeholder="Адрес, название кафе, парк..." required>
+                    <input type="text" id="meeting-location" class="form-input"
+                        placeholder="Адрес, название кафе, парк..." required>
                 </div>
-                
+
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label" for="meeting-max-slots">Максимум человек *</label>
-                        <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50" value="8" required>
+                        <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50" value="8"
+                            required>
                     </div>
-                    
+
                     <div class="form-group">
                         <label class="form-label" for="meeting-duration">Активна (часов) *</label>
                         <select id="meeting-duration" class="form-select">
@@ -543,7 +659,7 @@
                         </select>
                     </div>
                 </div>
-                
+
                 <div class="form-actions">
                     <button type="submit" class="btn-primary">Создать встречу</button>
                     <button type="button" id="cancel-create-btn" class="btn-secondary">Отмена</button>
@@ -555,6 +671,8 @@
     <!-- Скрипты -->
     <script src="env.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
     <script src="js/index.js"></script>
 </body>
+
 </html>
