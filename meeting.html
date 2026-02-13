@@ -91,6 +91,17 @@
             font-weight: 600;
             font-size: 13px;
         }
+
+        .location-icon {
+            width: 14px;
+            height: 14px;
+            flex: 0 0 14px;
+            display: inline-block;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none'><path d='M12 22s7-7 7-12a7 7 0 10-14 0c0 5 7 12 7 12z' fill='%23e11d48'/><circle cx='12' cy='10' r='3.2' fill='%23f8fafc'/></svg>");
+        }
         
         .headline {
             font-size: 22px;
@@ -207,7 +218,7 @@
             <div class="card">
                 <div class="tag-row">
                     <div id="meeting-tag" class="tag">#Встреча</div>
-                    <div id="meeting-city" class="city">📍 Город</div>
+                    <div id="meeting-city" class="city"><span class="location-icon" aria-hidden="true"></span>Город</div>
                 </div>
                 <div id="meeting-headline" class="headline">Заголовок встречи</div>
                 

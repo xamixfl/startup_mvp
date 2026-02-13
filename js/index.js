@@ -4,7 +4,7 @@ const { TABLES } = window.APP;
 let currentUser = null;
 let allMeetings = [];
 let currentProfile = null;
-const DEFAULT_AVATAR = 'assets/default-avatar.svg';
+const DEFAULT_AVATAR = 'assets/avatar.png';
 
 // Topics and cities will be fetched from database
 let TOPICS = [];
@@ -336,6 +336,7 @@ function renderMeetings(meetings) {
       ? meeting.creator.photo_URL
       : DEFAULT_AVATAR;
     const topicLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
+    const locationLabel = meeting.location || 'Город не указан';
 
     const meetingCard = document.createElement('div');
     meetingCard.className = 'meeting-card';
@@ -343,7 +344,10 @@ function renderMeetings(meetings) {
       window.location.href = `meeting.html?id=${meeting.id}`;
     };
     meetingCard.innerHTML = `
-      <div class="meeting-tag" style="background: ${topic.color}20; color: ${topic.color};">${topicLabel}</div>
+      <div class="meeting-topline">
+        <div class="meeting-tag" style="background: ${topic.color}20; color: ${topic.color};">${topicLabel}</div>
+        <div class="meeting-location"><span class="location-icon" aria-hidden="true"></span>${locationLabel}</div>
+      </div>
       <div class="meeting-thread">${meeting.title || meeting.headline || 'Новая встреча'}</div>
       <div class="meeting-meta">
         <div class="participants-pill">👥 ${participantsCount}/${meeting.max_slots}</div>

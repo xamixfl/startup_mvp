@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderMeetings(profile);
 });
 
-const DEFAULT_AVATAR = 'assets/default-avatar.svg';
+const DEFAULT_AVATAR = 'assets/avatar.png';
 
 function getLocalMeetings() {
   const raw = localStorage.getItem('meetup_meetings');

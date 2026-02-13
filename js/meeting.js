@@ -1,6 +1,6 @@
 const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
-const DEFAULT_AVATAR = 'assets/default-avatar.svg';
+const DEFAULT_AVATAR = 'assets/avatar.png';
 
 // Topics will be fetched from database
 let TOPICS = [];
@@ -44,7 +44,7 @@ function renderMeeting(meeting) {
 
   const cityEl = document.getElementById('meeting-city');
   if (meeting.location) {
-    cityEl.textContent = `📍 ${meeting.location}`;
+    cityEl.innerHTML = `<span class="location-icon" aria-hidden="true"></span>${meeting.location}`;
     cityEl.style.display = 'inline-flex';
   } else {
     cityEl.style.display = 'none';
