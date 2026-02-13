@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   console.log('create-meeting.js loaded');
   await populateTopicDropdown();
   checkAuthOrRedirect();
-  setExpirationLimits();
+  setupExpiresPicker();
   document.getElementById('create-meeting-form').addEventListener('submit', handleCreateMeeting);
 });
 
@@ -51,25 +51,24 @@ function handleCreateMeeting(event) {
   const headline = document.getElementById('meeting-headline').value.trim();
   const topic = document.getElementById('meeting-topic').value;
   const maxSlots = parseInt(document.getElementById('meeting-max-slots').value);
-  const expiresAt = document.getElementById('meeting-expires-at').value;
+  const expiresDate = document.getElementById('meeting-expires-date').value;
+  const expiresTime = document.getElementById('meeting-expires-time').value;
   const city = document.getElementById('meeting-city').value.trim();
   const details = document.getElementById('meeting-details').value.trim();
 
-  if (!headline || !topic || !maxSlots || !expiresAt || !city || !details) {
+  if (!headline || !topic || !maxSlots || !expiresDate || !expiresTime || !city || !details) {
     showNotification('Заполните все обязательные поля');
     return;
   }
 
   const now = new Date();
-  const expiresDate = new Date(expiresAt);
-  const diffHours = (expiresDate - now) / (1000 * 60 * 60);
-
-  if (diffHours <= 0) {
+  const expires = new Date(`${expiresDate}T${expiresTime}`);
+  const diffMs = expires - now;
+  if (diffMs <= 0) {
     showNotification('Время жизни должно быть больше текущего времени');
     return;
   }
-
-  if (diffHours > 24) {
+  if (diffMs > 24 * 60 * 60 * 1000) {
     showNotification('Максимальный срок жизни встречи — 24 часа');
     return;
   }
@@ -80,7 +79,7 @@ function handleCreateMeeting(event) {
     topic: topic,
     location: city,
     max_slots: maxSlots,
-    expires_at: expiresDate.toISOString()
+    expires_at: expires.toISOString()
   });
 }
 
@@ -126,16 +125,71 @@ async function createMeetingInDb(payload) {
   }
 }
 
-function setExpirationLimits() {
-  const input = document.getElementById('meeting-expires-at');
-  const now = new Date();
-  const maxDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+function setupExpiresPicker() {
+  const dateInput = document.getElementById('meeting-expires-date');
+  const timeSelect = document.getElementById('meeting-expires-time');
+  const hint = document.getElementById('expires-hint');
+  if (!dateInput || !timeSelect) return;
 
-  const toLocalValue = (date) => {
-    const pad = (num) => String(num).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const now = new Date();
+  const max = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  dateInput.min = toDateValue(now);
+  dateInput.max = toDateValue(max);
+  dateInput.value = toDateValue(now);
+
+  const buildTimes = (dateStr) => {
+    timeSelect.innerHTML = '';
+    const date = new Date(`${dateStr}T00:00`);
+    if (isNaN(date.getTime())) return;
+
+    const start = new Date(now);
+    const end = new Date(max);
+    const dayStart = new Date(date);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const minTime = start > dayStart ? start : dayStart;
+    const maxTime = end < dayEnd ? end : dayEnd;
+
+    if (minTime > maxTime) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Нет доступного времени';
+      timeSelect.appendChild(option);
+      return;
+    }
+
+    const cursor = new Date(minTime);
+    cursor.setMinutes(Math.ceil(cursor.getMinutes() / 5) * 5);
+    cursor.setSeconds(0, 0);
+
+    while (cursor <= maxTime) {
+      const opt = document.createElement('option');
+      opt.value = toTimeValue(cursor);
+      opt.textContent = toTimeValue(cursor);
+      timeSelect.appendChild(opt);
+      cursor.setMinutes(cursor.getMinutes() + 5);
+    }
+
+    if (!timeSelect.value) {
+      timeSelect.selectedIndex = 0;
+    }
   };
 
-  input.min = toLocalValue(now);
-  input.max = toLocalValue(maxDate);
+  dateInput.addEventListener('change', () => buildTimes(dateInput.value));
+  buildTimes(dateInput.value);
+
+  if (hint) {
+    hint.textContent = 'Можно выбрать только в пределах 24 часов.';
+  }
+}
+
+function toDateValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function toTimeValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
