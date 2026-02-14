@@ -27,6 +27,7 @@
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
+            cursor: default;
         }
 
         .header {
@@ -265,6 +266,11 @@
             border: 1px solid #e2e8f0;
             transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
             cursor: pointer;
+            user-select: none;
+        }
+
+        .meeting-card * {
+            user-select: none;
         }
 
         .meeting-card:hover {
@@ -581,6 +587,88 @@
             border-radius: 12px;
             margin: 20px 0;
         }
+
+        .search-bar {
+            margin: 20px 0 10px;
+            background: white;
+            border-radius: 14px;
+            padding: 14px 16px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        }
+
+        .search-input {
+            width: 100%;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-size: 15px;
+            cursor: text;
+            user-select: text;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .search-results {
+            margin-top: 10px;
+            display: none;
+            gap: 10px;
+            flex-direction: column;
+        }
+
+        .search-section-title {
+            font-size: 12px;
+            color: #64748b;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .search-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            cursor: pointer;
+        }
+
+        .search-item:hover {
+            border-color: #3b82f6;
+            background: #eff6ff;
+        }
+
+        .search-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            overflow: hidden;
+            background: #e2e8f0;
+            flex-shrink: 0;
+        }
+
+        .search-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .search-title {
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 14px;
+        }
+
+        .search-subtitle {
+            font-size: 12px;
+            color: #64748b;
+        }
     </style>
 </head>
 
@@ -596,6 +684,11 @@
             </a>
         </div>
     </header>
+
+    <div class="search-bar">
+        <input id="global-search" class="search-input" type="text" placeholder="Поиск людей и встреч">
+        <div id="search-results" class="search-results"></div>
+    </div>
 
     <!-- Основной контент -->
     <div class="main-grid">

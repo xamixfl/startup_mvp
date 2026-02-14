@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initApp();
   await loadMeetings();
   setupEventListeners();
+  setupGlobalSearch();
 });
 
 async function initApp() {
@@ -638,4 +639,131 @@ async function fetchProfile(userId) {
     console.error('Ошибка загрузки профиля:', error);
     return null;
   }
+}
+
+function setupGlobalSearch() {
+  const input = document.getElementById('global-search');
+  const results = document.getElementById('search-results');
+  if (!input || !results) return;
+
+  let timer = null;
+  input.addEventListener('input', () => {
+    const query = input.value.trim();
+    clearTimeout(timer);
+    timer = setTimeout(() => runSearch(query, results), 250);
+  });
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (results) results.style.display = 'none';
+    }, 200);
+  });
+  input.addEventListener('focus', () => {
+    if (results && results.childElementCount > 0) {
+      results.style.display = 'flex';
+    }
+  });
+}
+
+async function runSearch(query, results) {
+  if (!results) return;
+  if (!query || query.length < 2) {
+    results.style.display = 'none';
+    results.innerHTML = '';
+    return;
+  }
+
+  const [people, meetings] = await Promise.all([
+    searchProfiles(query),
+    searchMeetings(query)
+  ]);
+
+  results.innerHTML = '';
+  if (people.length === 0 && meetings.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'search-subtitle';
+    empty.textContent = 'Ничего не найдено';
+    results.appendChild(empty);
+    results.style.display = 'flex';
+    return;
+  }
+
+  if (people.length > 0) {
+    const title = document.createElement('div');
+    title.className = 'search-section-title';
+    title.textContent = 'Люди';
+    results.appendChild(title);
+    people.forEach(p => results.appendChild(renderProfileResult(p)));
+  }
+
+  if (meetings.length > 0) {
+    const title = document.createElement('div');
+    title.className = 'search-section-title';
+    title.textContent = 'Встречи';
+    results.appendChild(title);
+    meetings.forEach(m => results.appendChild(renderMeetingResult(m)));
+  }
+
+  results.style.display = 'flex';
+}
+
+async function searchProfiles(query) {
+  if (!supabaseClient) return [];
+  try {
+    const { data, error } = await supabaseClient
+      .from(TABLES.profiles)
+      .select('id, username, full_name, age, photo_URL')
+      .or(`username.ilike.%${query}%,full_name.ilike.%${query}%`)
+      .limit(5);
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Ошибка поиска профилей:', error);
+    return [];
+  }
+}
+
+function searchMeetings(query) {
+  const term = query.toLowerCase();
+  return allMeetings
+    .filter(m => (m.title || m.headline || '').toLowerCase().includes(term))
+    .slice(0, 5);
+}
+
+function renderProfileResult(profile) {
+  const item = document.createElement('div');
+  item.className = 'search-item';
+  item.onclick = () => {
+    window.location.href = `profile.html?id=${profile.id}`;
+  };
+
+  const avatarUrl = profile.photo_URL && profile.photo_URL !== 'user'
+    ? profile.photo_URL
+    : DEFAULT_AVATAR;
+  const name = profile.full_name || profile.username || 'Пользователь';
+  const age = profile.age ? `${profile.age} лет` : '';
+
+  item.innerHTML = `
+    <div class="search-avatar"><img src="${avatarUrl}" alt="${name}"></div>
+    <div>
+      <div class="search-title">${name}</div>
+      <div class="search-subtitle">${age}</div>
+    </div>
+  `;
+  return item;
+}
+
+function renderMeetingResult(meeting) {
+  const item = document.createElement('div');
+  item.className = 'search-item';
+  item.onclick = () => {
+    window.location.href = `meeting.html?id=${meeting.id}`;
+  };
+  const title = meeting.title || meeting.headline || 'Встреча';
+  item.innerHTML = `
+    <div>
+      <div class="search-title">${title}</div>
+      <div class="search-subtitle">${meeting.location || ''}</div>
+    </div>
+  `;
+  return item;
 }
