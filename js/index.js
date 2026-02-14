@@ -13,6 +13,19 @@ const selectedTopics = new Set();
 const selectedCities = new Set();
 let allCities = [];
 
+const BASE_CITIES = [
+  'Москва',
+  'Санкт-Петербург',
+  'Казань',
+  'Новосибирск',
+  'Екатеринбург',
+  'Нижний Новгород',
+  'Самара',
+  'Ростов-на-Дону',
+  'Краснодар',
+  'Владивосток'
+];
+
 document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
   populateTopicDropdown();
@@ -47,8 +60,7 @@ async function initApp() {
   });
 
   loadFilters();
-  await loadCitiesFromDatabase();
-  loadCityFilters();
+  loadCitiesFromDatabase();
 }
 
 function updateUserUI(user) {
@@ -293,12 +305,12 @@ async function loadMeetings() {
 
     if (!meetings || meetings.length === 0) {
       allMeetings = [];
-      await loadCitiesFromDatabase();
+      loadCityFilters();
       renderEmptyState();
     } else {
       const meetingsWithCreators = await attachCreators(meetings);
       allMeetings = meetingsWithCreators;
-      await loadCitiesFromDatabase();
+      loadCityFilters();
       renderFilteredMeetings();
     }
   } catch (error) {
@@ -448,50 +460,8 @@ function setActiveFilterButton(topicId) {
   });
 }
 
-async function loadCitiesFromDatabase() {
-  const citiesSet = new Set();
-
-  try {
-    // Load cities from meetings
-    const { data: meetings, error: meetingsError } = await supabaseClient
-      .from(TABLES.meetings)
-      .select('location');
-
-    if (!meetingsError && meetings) {
-      meetings.forEach(m => {
-        if (m.location) {
-          const parts = m.location.split(',');
-          let city = parts[parts.length - 1].trim();
-          if (city && city.length > 0) {
-            city = city.charAt(0).toUpperCase() + city.slice(1);
-            citiesSet.add(city);
-          }
-        }
-      });
-    }
-
-    // Load cities from profiles
-    const { data: profiles, error: profilesError } = await supabaseClient
-      .from(TABLES.profiles)
-      .select('location');
-
-    if (!profilesError && profiles) {
-      profiles.forEach(p => {
-        if (p.location) {
-          const parts = p.location.split(',');
-          let city = parts[parts.length - 1].trim();
-          if (city && city.length > 0) {
-            city = city.charAt(0).toUpperCase() + city.slice(1);
-            citiesSet.add(city);
-          }
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Ошибка загрузки городов:', error);
-  }
-
-  allCities = Array.from(citiesSet).sort();
+function loadCitiesFromDatabase() {
+  allCities = [...BASE_CITIES];
   loadCityFilters();
 }
 
@@ -507,11 +477,8 @@ function renderFilteredMeetings() {
   if (selectedCities.size > 0) {
     filtered = filtered.filter(meeting => {
       if (!meeting.location) return false;
-      const parts = meeting.location.split(',');
-      let city = parts[parts.length - 1].trim();
-      // Capitalize first letter to match BASE_CITIES format
-      city = city.charAt(0).toUpperCase() + city.slice(1);
-      return selectedCities.has(city);
+      const city = matchCityFromLocation(meeting.location);
+      return city ? selectedCities.has(city) : false;
     });
   }
 
@@ -621,6 +588,18 @@ function getLocalMeetings() {
 
 function setupEventListeners() {
   // no-op for now
+}
+
+function matchCityFromLocation(location) {
+  if (!location) return null;
+  const normalized = location.trim().toLowerCase();
+  const direct = BASE_CITIES.find(city => normalized.startsWith(city.toLowerCase()));
+  if (direct) return direct;
+  // Fallback: try first token before comma
+  const firstPart = location.split(',')[0]?.trim();
+  if (!firstPart) return null;
+  const byFirst = BASE_CITIES.find(city => city.toLowerCase() === firstPart.toLowerCase());
+  return byFirst || null;
 }
 
 window.showCreateModal = showCreateModal;
