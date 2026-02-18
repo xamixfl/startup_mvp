@@ -199,7 +199,8 @@ async function setupChatState(meeting, user) {
 
 async function requestJoin(meeting, user) {
   if (!user) {
-    showNotification('Сначала войдите в аккаунт');
+    const returnTo = meeting?.id ? `meeting.html?id=${meeting.id}` : 'meeting.html';
+    window.location.href = `login.html?next=${encodeURIComponent(returnTo)}`;
     return;
   }
   if (!meeting.chat_id) {
@@ -224,11 +225,18 @@ async function requestJoin(meeting, user) {
     .insert([{ chat_id: meeting.chat_id, user_id: user.id, role: 'member', status: 'pending' }]);
 
   if (error) {
+    if (error.code === '23505' || error.status === 409) {
+      showNotification('Заявка уже отправлена');
+      const { data: { user: freshUser } } = await supabaseClient.auth.getUser();
+      await setupChatState(meeting, freshUser || user);
+      return;
+    }
     showNotification('Ошибка отправки заявки');
     return;
   }
   showNotification('Заявка отправлена');
-  await setupChatState(meeting, user);
+  const { data: { user: freshUser } } = await supabaseClient.auth.getUser();
+  await setupChatState(meeting, freshUser || user);
 }
 
 async function approveRequest(meeting, userId) {
@@ -296,4 +304,3 @@ function showNotification(message) {
     notification.style.display = 'none';
   }, 3000);
 }
-

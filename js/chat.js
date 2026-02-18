@@ -7,6 +7,7 @@ let pendingOpenChatId = null;
 let TOPICS = null;
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
+const UNREAD_KEY = 'meetup_chat_last_read';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const { data: { user } } = await supabaseClient.auth.getUser();
@@ -101,8 +102,10 @@ async function loadChats() {
     list.innerHTML = '<div class="chat-item">Нет доступа к чатам (RLS)</div>';
     return;
   }
+  await applyLastMessageMeta(mergedIds);
   await enrichDirectChatTitles();
   await cleanupEmptyDirectChats(new Set(refreshedIds), currentChat?.id);
+  sortChatsByLastActivity();
   renderChatList();
   if (pendingOpenChatId) {
     const chat = chats.find(c => c.id === pendingOpenChatId);
@@ -121,8 +124,12 @@ function renderChatList() {
     item.className = 'chat-item';
     item.dataset.chatId = chat.id;
     const title = chat.meeting_id ? chat.title : (chat.display_title || chat.title);
+    const isUnread = isChatUnread(chat);
     item.innerHTML = `
-      <div class="chat-item-title">${title}</div>
+      <div class="chat-item-row">
+        <div class="chat-item-title">${title}</div>
+        ${isUnread ? '<div class="chat-unread">●</div>' : ''}
+      </div>
       <div class="chat-item-sub">${chat.meeting_id ? 'Чат встречи' : 'Личный чат'}</div>
     `;
     item.onclick = () => openChat(chat);
@@ -157,6 +164,8 @@ async function openChat(chat) {
     titleEl.textContent = chat.display_title;
   }
   await loadMessages(chat.id);
+  markChatRead(chat);
+  renderChatList();
   await loadChatInfo(chat);
 }
 
@@ -260,6 +269,69 @@ async function loadMessages(chatId) {
     body.appendChild(bubble);
   });
   body.scrollTop = body.scrollHeight;
+}
+
+async function applyLastMessageMeta(chatIds) {
+  if (!chatIds || chatIds.length === 0) return;
+  const { data: messages, error } = await supabaseClient
+    .from(TABLES.chat_messages)
+    .select('chat_id, created_at')
+    .in('chat_id', chatIds)
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('Ошибка загрузки последних сообщений:', error);
+    return;
+  }
+  const latestByChat = new Map();
+  (messages || []).forEach(msg => {
+    if (!latestByChat.has(msg.chat_id)) {
+      latestByChat.set(msg.chat_id, msg.created_at);
+    }
+  });
+  chats.forEach(chat => {
+    chat.last_message_at = latestByChat.get(chat.id) || null;
+  });
+}
+
+function sortChatsByLastActivity() {
+  chats.sort((a, b) => {
+    const aTime = Date.parse(a.last_message_at || a.created_at || 0);
+    const bTime = Date.parse(b.last_message_at || b.created_at || 0);
+    return bTime - aTime;
+  });
+}
+
+function getReadMap() {
+  try {
+    const raw = localStorage.getItem(UNREAD_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function setReadMap(map) {
+  localStorage.setItem(UNREAD_KEY, JSON.stringify(map));
+}
+
+function getChatReadKey(chatId) {
+  return `${currentUser?.id || 'guest'}:${chatId}`;
+}
+
+function markChatRead(chat) {
+  if (!chat) return;
+  const map = getReadMap();
+  const lastAt = chat.last_message_at || new Date().toISOString();
+  map[getChatReadKey(chat.id)] = lastAt;
+  setReadMap(map);
+}
+
+function isChatUnread(chat) {
+  if (!chat || !chat.last_message_at) return false;
+  const map = getReadMap();
+  const lastRead = map[getChatReadKey(chat.id)];
+  if (!lastRead) return true;
+  return Date.parse(chat.last_message_at) > Date.parse(lastRead);
 }
 
 async function cleanupEmptyDirectChats(approvedSet, openedChatId) {
