@@ -14,7 +14,10 @@ window.APP = {
     meetings: 'meetings',
     participants: 'table-connector',
     cities: 'cities',
-    topics: 'topics'
+    topics: 'topics',
+    chats: 'chats',
+    chat_members: 'chat_members',
+    chat_messages: 'chat_messages'
   }
 };
 

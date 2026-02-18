@@ -1,5 +1,6 @@
 const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
+let isSubmitting = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('create-meeting.js loaded');
@@ -42,6 +43,7 @@ function showNotification(message) {
 
 function handleCreateMeeting(event) {
   event.preventDefault();
+  if (isSubmitting) return;
   if (!supabaseClient) {
     showNotification('Supabase не подключен');
     console.error('Supabase client missing in create-meeting.js');
@@ -92,6 +94,10 @@ async function createMeetingInDb(payload) {
   }
 
   try {
+    isSubmitting = true;
+    const submitBtn = document.querySelector('#create-meeting-form .btn');
+    if (submitBtn) submitBtn.disabled = true;
+
     const { data, error } = await supabaseClient
       .from(TABLES.meetings)
       .insert([{
@@ -110,6 +116,40 @@ async function createMeetingInDb(payload) {
         .insert([{ meeting_id: data.id, user_id: user.id }]);
     }
 
+    const { data: chatData, error: chatError } = await supabaseClient
+      .from(TABLES.chats)
+      .insert([{
+        meeting_id: data.id,
+        title: data.title || payload.title,
+        owner_id: user.id
+      }])
+      .select()
+      .single();
+
+    if (chatError) {
+      console.error('Ошибка создания чата:', chatError);
+      throw chatError;
+    }
+
+    if (chatData?.id) {
+      const { error: memberError } = await supabaseClient
+        .from(TABLES.chat_members)
+        .insert([{ chat_id: chatData.id, user_id: user.id, role: 'owner', status: 'approved' }]);
+      if (memberError) {
+        console.error('Ошибка добавления владельца в чат:', memberError);
+        throw memberError;
+      }
+
+      const { error: updateError } = await supabaseClient
+        .from(TABLES.meetings)
+        .update({ chat_id: chatData.id })
+        .eq('id', data.id);
+      if (updateError) {
+        console.error('Ошибка обновления chat_id в встрече:', updateError);
+        throw updateError;
+      }
+    }
+
     // Automatically add city to cities table
     if (payload.location && window.addCity) {
       await window.addCity(payload.location);
@@ -122,6 +162,10 @@ async function createMeetingInDb(payload) {
   } catch (error) {
     console.error('Ошибка создания встречи:', error);
     showNotification(error.message || 'Ошибка создания встречи');
+  } finally {
+    isSubmitting = false;
+    const submitBtn = document.querySelector('#create-meeting-form .btn');
+    if (submitBtn) submitBtn.disabled = false;
   }
 }
 

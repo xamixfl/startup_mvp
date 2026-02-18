@@ -1,8 +1,11 @@
 // Topics will be fetched from database
 let TOPICS = [];
+let currentUser = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
+  const { data: { user } } = await window.APP.supabase.auth.getUser();
+  currentUser = user || null;
   const params = new URLSearchParams(window.location.search);
   const id = params.get('id');
   const name = params.get('name');
@@ -43,7 +46,7 @@ async function fetchProfile(id, name) {
     if (id) {
       const { data, error } = await supabaseClient
         .from('profiles')
-        .select('id, username, full_name, age, sex, location, photo_URL, interests')
+        .select('*')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -53,7 +56,7 @@ async function fetchProfile(id, name) {
     if (name) {
       const { data, error } = await supabaseClient
         .from('profiles')
-        .select('id, username, full_name, age, sex, location, photo_URL, interests')
+        .select('*')
         .eq('username', name)
         .maybeSingle();
       if (error) throw error;
@@ -78,6 +81,30 @@ function renderProfile(profile) {
   document.getElementById('profile-name').textContent = displayName;
   document.getElementById('profile-meta').textContent = profile.age ? `${profile.age} лет` : 'Возраст не указан';
   document.getElementById('profile-city').textContent = profile.location || 'Город не указан';
+  document.getElementById('profile-about').textContent = profile.about || profile.bio || profile.description || 'О себе: —';
+
+  const modal = document.getElementById('avatar-modal');
+  const modalImg = document.getElementById('avatar-modal-img');
+  avatar.onclick = () => {
+    if (!modal || !modalImg) return;
+    modalImg.src = avatarUrl;
+    modal.style.display = 'flex';
+  };
+  if (modal) {
+    modal.onclick = () => {
+      modal.style.display = 'none';
+    };
+  }
+
+  const messageBtn = document.getElementById('message-btn');
+  if (messageBtn) {
+    if (currentUser && profile.id && currentUser.id !== profile.id) {
+      messageBtn.style.display = 'block';
+      messageBtn.onclick = () => createDirectChat(profile);
+    } else {
+      messageBtn.style.display = 'none';
+    }
+  }
 
   const interestsWrap = document.getElementById('profile-interests');
   interestsWrap.innerHTML = '';
@@ -88,6 +115,83 @@ function renderProfile(profile) {
     pill.textContent = topic ? topic.name : normalizeInterestLabel(id);
     interestsWrap.appendChild(pill);
   });
+}
+
+async function createDirectChat(profile) {
+  if (!currentUser) {
+    window.location.href = 'login.html';
+    return;
+  }
+  const { TABLES } = window.APP;
+  try {
+    const { data: myMemberships } = await window.APP.supabase
+      .from(TABLES.chat_members)
+      .select('chat_id')
+      .eq('user_id', currentUser.id)
+      .eq('status', 'approved');
+
+    const myChatIds = (myMemberships || []).map(m => m.chat_id);
+    if (myChatIds.length > 0) {
+      const { data: otherMemberships } = await window.APP.supabase
+        .from(TABLES.chat_members)
+        .select('chat_id')
+        .eq('user_id', profile.id)
+        .eq('status', 'approved')
+        .in('chat_id', myChatIds);
+
+      const commonChatIds = (otherMemberships || []).map(m => m.chat_id);
+      if (commonChatIds.length > 0) {
+        const { data: existingChats } = await window.APP.supabase
+          .from(TABLES.chats)
+          .select('id, meeting_id')
+          .in('id', commonChatIds);
+        const direct = (existingChats || []).find(c => !c.meeting_id);
+        if (direct) {
+          window.location.href = `chat.html?chat_id=${direct.id}`;
+          return;
+        }
+      }
+    }
+
+    const title = profile.full_name || profile.username || 'Чат';
+    const { data: chat, error: chatError } = await window.APP.supabase
+      .from(TABLES.chats)
+      .insert([{
+        meeting_id: null,
+        title,
+        owner_id: currentUser.id,
+        peer_id: profile.id
+      }])
+      .select()
+      .single();
+    if (chatError) throw chatError;
+
+    const { error: ownerInsertError } = await window.APP.supabase
+      .from(TABLES.chat_members)
+      .insert([
+        { chat_id: chat.id, user_id: currentUser.id, role: 'owner', status: 'approved' }
+      ]);
+    if (ownerInsertError) {
+      await window.APP.supabase.from(TABLES.chats).delete().eq('id', chat.id);
+      throw ownerInsertError;
+    }
+
+    const { error: peerInsertError } = await window.APP.supabase
+      .from(TABLES.chat_members)
+      .insert([
+        { chat_id: chat.id, user_id: profile.id, role: 'member', status: 'approved' }
+      ]);
+    if (peerInsertError) {
+      await window.APP.supabase.from(TABLES.chat_members).delete().eq('chat_id', chat.id);
+      await window.APP.supabase.from(TABLES.chats).delete().eq('id', chat.id);
+      throw peerInsertError;
+    }
+
+    window.location.href = `chat.html?chat_id=${chat.id}`;
+  } catch (error) {
+    console.error('Ошибка создания личного чата:', error);
+    alert('Не удалось создать личный чат. Проверьте RLS политики.');
+  }
 }
 
 function normalizeInterestLabel(id) {

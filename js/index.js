@@ -308,7 +308,8 @@ async function loadMeetings() {
       loadCityFilters();
       renderEmptyState();
     } else {
-      const meetingsWithCreators = await attachCreators(meetings);
+      const uniqueMeetings = Array.from(new Map(meetings.map(m => [m.id, m])).values());
+      const meetingsWithCreators = await attachCreators(uniqueMeetings);
       allMeetings = meetingsWithCreators;
       loadCityFilters();
       renderFilteredMeetings();

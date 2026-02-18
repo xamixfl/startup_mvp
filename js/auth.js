@@ -174,6 +174,7 @@ async function validateStep3() {
     const gender = document.getElementById('gender').value;
     const city = document.getElementById('city').value.trim();
     const username = document.getElementById('username').value.trim();
+    const about = document.getElementById('bio')?.value.trim() || '';
     const selectedCategories = Array.from(
       document.querySelectorAll('.category-checkbox:checked')
     ).map(cb => cb.value);
@@ -187,7 +188,8 @@ async function validateStep3() {
           username: username,
           age: String(age),
           sex: gender,
-          location: city
+          location: city,
+          about: about
         },
         emailRedirectTo: `${window.location.origin}/login.html?confirmed=true`
       }
@@ -226,7 +228,8 @@ async function validateStep3() {
         sex: gender,
         location: city,
         photo_URL: publicUrl || 'user',
-        interests: selectedCategories
+        interests: selectedCategories,
+        about: about
       }]);
 
     if (profileError) throw profileError;

@@ -194,6 +194,56 @@
             font-weight: 600;
             color: #475569;
         }
+
+        .btn-secondary {
+            width: 100%;
+            background: #f1f5f9;
+            color: #475569;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: #e2e8f0;
+        }
+
+        .request-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .request-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-approve,
+        .btn-reject {
+            border: none;
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .btn-approve {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-reject {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
         
         .notification {
             position: fixed;
@@ -239,6 +289,16 @@
                     </div>
                 </div>
                 <div class="card participants" id="participants-info">👥 0/0 участников</div>
+                <div class="card" id="join-status-card" style="display: none;">
+                    <div class="details-title">Статус участия</div>
+                    <div id="join-status-text" class="details-text" style="margin-bottom: 0;">—</div>
+                    <button id="open-chat-btn" class="btn-secondary" style="display: none; margin-top: 12px;">Открыть чат</button>
+                    <button id="leave-chat-btn" class="btn-secondary" style="display: none; margin-top: 12px;">Покинуть чат</button>
+                </div>
+                <div class="card" id="requests-card" style="display: none;">
+                    <div class="details-title">Заявки в чат</div>
+                    <div id="requests-list" class="details-text" style="margin-bottom: 0;"></div>
+                </div>
             </div>
         </div>
     </div>

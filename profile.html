@@ -109,7 +109,52 @@
             gap: 8px;
             justify-content: center;
         }
-        
+
+        .about {
+            font-size: 14px;
+            color: #475569;
+            line-height: 1.6;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 12px;
+            width: 100%;
+            text-align: left;
+        }
+
+        .btn-message {
+            width: 100%;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .btn-message:hover {
+            background: #2563eb;
+        }
+
+        .avatar-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .avatar-modal img {
+            max-width: 90vw;
+            max-height: 90vh;
+            border-radius: 16px;
+            background: white;
+            padding: 6px;
+        }
+
         .interest-pill {
             background: #e2e8f0;
             color: #475569;
@@ -187,7 +232,9 @@
                 <div id="profile-name" class="name">Пользователь</div>
                 <div id="profile-meta" class="meta">Возраст не указан</div>
                 <div id="profile-city" class="meta">Город не указан</div>
+                <div id="profile-about" class="about">О себе: —</div>
                 <div id="profile-interests" class="interests"></div>
+                <button id="message-btn" class="btn-message" style="display: none;">Написать</button>
             </div>
             
             <div class="card">
@@ -195,6 +242,10 @@
                 <div id="meeting-list" class="meeting-list"></div>
             </div>
         </div>
+    </div>
+
+    <div id="avatar-modal" class="avatar-modal">
+        <img id="avatar-modal-img" src="" alt="Фото профиля">
     </div>
     
     <script src="env.js"></script>
