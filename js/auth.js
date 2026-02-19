@@ -234,11 +234,6 @@ async function validateStep3() {
 
     if (profileError) throw profileError;
 
-    // Automatically add city to cities table
-    if (city && window.addCity) {
-      await window.addCity(city);
-    }
-
     document.getElementById('confirmation-text').innerHTML = `
       Мы отправили письмо с подтверждением на <strong>${email}</strong>.<br><br>
       Пожалуйста, проверьте почту и перейдите по ссылке в письме, чтобы активировать аккаунт.<br><br>

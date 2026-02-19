@@ -37,6 +37,7 @@
             padding: 20px 0;
             border-bottom: 2px solid #e2e8f0;
             margin-bottom: 30px;
+            gap: 20px;
         }
 
         .logo {
@@ -44,17 +45,54 @@
             font-weight: 800;
             color: #3b82f6;
             text-decoration: none;
+            flex-shrink: 0;
+        }
+
+        .nav-link {
+            color: #1e293b;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            padding: 0 12px;
+            border-right: 1px solid #cbd5e1;
+            transition: color 0.2s;
+        }
+
+        .nav-link:hover {
+            color: #3b82f6;
         }
 
         .user-section {
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 0;
+        }
+
+        .user-link {
+            color: #1e293b;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            padding: 0 12px;
+            border-right: 1px solid #cbd5e1;
+            transition: color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-link:hover {
+            color: #3b82f6;
+        }
+
+        .user-link:last-child {
+            border-right: none;
+            padding-right: 0;
         }
 
         .user-avatar {
-            width: 36px;
-            height: 36px;
+            width: 28px;
+            height: 28px;
             border-radius: 50%;
             background: #f1f5f9;
             color: #64748b;
@@ -62,7 +100,7 @@
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 18px;
+            font-size: 14px;
             border: 2px solid #e2e8f0;
             overflow: hidden;
             flex-shrink: 0;
@@ -289,7 +327,7 @@
             display: inline-block;
             margin-bottom: 14px;
         }
-        
+
         .meeting-topline {
             display: flex;
             align-items: center;
@@ -298,7 +336,7 @@
             margin-bottom: 14px;
             justify-content: space-between;
         }
-        
+
         .meeting-location {
             display: inline-flex;
             align-items: center;
@@ -322,6 +360,7 @@
             background-position: center;
             background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none'><path d='M12 22s7-7 7-12a7 7 0 10-14 0c0 5 7 12 7 12z' fill='%23e11d48'/><circle cx='12' cy='10' r='3.2' fill='%23f8fafc'/></svg>");
         }
+
         .meeting-thread {
             color: #1e293b;
             font-size: 18px;
@@ -543,6 +582,11 @@
                 text-align: center;
             }
 
+            .user-section {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
             .meeting-details {
                 flex-direction: column;
                 gap: 10px;
@@ -594,7 +638,7 @@
             border-radius: 14px;
             padding: 14px 16px;
             border: 1px solid #e2e8f0;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
         }
 
         .search-input {
@@ -694,12 +738,13 @@
     <header class="header">
         <a href="index.html" class="logo">MEETUP</a>
         <div class="user-section">
-            <span id="user-name">Гость</span>
-            <div id="user-avatar" class="user-avatar">👤</div>
-            <a id="chat-button" class="btn-create btn-header" href="chat.html">Чаты</a>
-            <a id="auth-button" class="btn-create btn-header" href="login.html">
-                Войти
+            <a id="my-events-button" class="nav-link" href="#" style="display: none;">Мои ивенты</a>
+            <a id="chat-button" class="nav-link" href="chat.html" style="display: none;">Чаты</a>
+            <a id="user-link" class="user-link" href="#">
+                <div id="user-avatar" class="user-avatar">👤</div>
+                <span id="user-name">Гость</span>
             </a>
+            <a id="auth-button" class="user-link" href="login.html">Войти</a>
         </div>
     </header>
 
@@ -725,7 +770,7 @@
                     <!-- Фильтры будут добавлены через JS -->
                 </ul>
             </div>
-            
+
             <div class="filter-section" tabindex="0">
                 <div class="filter-trigger">
                     <h3>Города</h3>
@@ -774,44 +819,43 @@
                         <option value="" disabled selected>-- Выберите тему --</option>
                     </select>
                 </div>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label" for="meeting-description">Описание</label>
-                    <textarea id="meeting-description" class="form-textarea"
-                        placeholder="Опишите встречу: что будете делать, какие правила, что взять с собой..."></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label" for="meeting-location">Место встречи *</label>
-                    <input type="text" id="meeting-location" class="form-input"
-                        placeholder="Адрес, название кафе, парк..." required>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label" for="meeting-max-slots">Максимум человек *</label>
-                        <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50" value="8"
-                            required>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label" for="meeting-duration">Активна (часов) *</label>
-                        <select id="meeting-duration" class="form-select">
-                            <option value="6">6 часов</option>
-                            <option value="12">12 часов</option>
-                            <option value="24" selected>24 часа</option>
-                            <option value="48">48 часов</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary">Создать встречу</button>
-                    <button type="button" id="cancel-create-btn" class="btn-secondary">Отмена</button>
-                </div>
-            </form>
         </div>
+
+        <div class="form-group">
+            <label class="form-label" for="meeting-description">Описание</label>
+            <textarea id="meeting-description" class="form-textarea"
+                placeholder="Опишите встречу: что будете делать, какие правила, что взять с собой..."></textarea>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="meeting-location">Место встречи *</label>
+            <input type="text" id="meeting-location" class="form-input" placeholder="Адрес, название кафе, парк..."
+                required>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label" for="meeting-max-slots">Максимум человек *</label>
+                <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50" value="8" required>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="meeting-duration">Активна (часов) *</label>
+                <select id="meeting-duration" class="form-select">
+                    <option value="6">6 часов</option>
+                    <option value="12">12 часов</option>
+                    <option value="24" selected>24 часа</option>
+                    <option value="48">48 часов</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn-primary">Создать встречу</button>
+            <button type="button" id="cancel-create-btn" class="btn-secondary">Отмена</button>
+        </div>
+        </form>
+    </div>
     </div>
 
     <footer class="footer">
@@ -827,4 +871,3 @@
 </body>
 
 </html>
-

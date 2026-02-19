@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,62 +13,62 @@
             box-sizing: border-box;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        
+
         body {
             background: #f8fafc;
             color: #1e293b;
             min-height: 100vh;
             padding: 30px 20px;
         }
-        
+
         .page {
             max-width: 760px;
             margin: 0 auto;
         }
-        
+
         .header {
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin-bottom: 24px;
         }
-        
+
         .logo {
             font-size: 28px;
             font-weight: 800;
             color: #3b82f6;
             text-decoration: none;
         }
-        
+
         .back-link {
             color: #64748b;
             text-decoration: none;
             font-weight: 600;
         }
-        
+
         .card {
             background: white;
             border-radius: 16px;
             padding: 28px;
             border: 1px solid #e2e8f0;
-            box-shadow: 0 6px 18px rgba(0,0,0,0.05);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
         }
-        
+
         .title {
             font-size: 24px;
             font-weight: 800;
             margin-bottom: 8px;
         }
-        
+
         .subtitle {
             color: #64748b;
             margin-bottom: 24px;
         }
-        
+
         .form-group {
             margin-bottom: 18px;
         }
-        
+
         .form-label {
             display: block;
             font-weight: 600;
@@ -75,7 +76,7 @@
             font-size: 14px;
             color: #475569;
         }
-        
+
         .form-input,
         .form-textarea,
         .form-select {
@@ -86,19 +87,19 @@
             font-size: 15px;
             transition: border-color 0.2s;
         }
-        
+
         .form-textarea {
             min-height: 120px;
             resize: vertical;
         }
-        
+
         .form-input:focus,
         .form-textarea:focus,
         .form-select:focus {
             outline: none;
             border-color: #3b82f6;
         }
-        
+
         .form-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -117,19 +118,19 @@
                 grid-template-columns: 1fr;
             }
         }
-        
+
         @media (max-width: 700px) {
             .form-row {
                 grid-template-columns: 1fr;
             }
         }
-        
+
         .hint {
             font-size: 12px;
             color: #94a3b8;
             margin-top: 6px;
         }
-        
+
         .btn {
             width: 100%;
             background: #3b82f6;
@@ -142,11 +143,11 @@
             cursor: pointer;
             transition: background 0.2s;
         }
-        
+
         .btn:hover {
             background: #2563eb;
         }
-        
+
         .notification {
             position: fixed;
             bottom: 20px;
@@ -174,73 +175,145 @@
         .footer a:hover {
             text-decoration: underline;
         }
+
+        .lifetime-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .lifetime-option {
+            display: inline-flex;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .lifetime-option input[type="radio"] {
+            display: none;
+        }
+
+        .lifetime-option span {
+            display: inline-block;
+            padding: 10px 18px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 14px;
+            color: #64748b;
+            background: white;
+            transition: all 0.2s;
+        }
+
+        .lifetime-option input[type="radio"]:checked+span {
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: white;
+        }
+
+        .lifetime-option:hover span {
+            border-color: #3b82f6;
+            color: #3b82f6;
+        }
+
+        .lifetime-option input[type="radio"]:checked+span:hover {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: white;
+        }
     </style>
 </head>
+
 <body>
     <div class="page">
         <div class="header">
             <a href="index.html" class="logo">MEETUP</a>
             <a href="index.html" class="back-link">← К ленте</a>
         </div>
-        
+
         <div class="card">
             <div class="title">Создать встречу</div>
             <div class="subtitle">Заполни основные данные, и встреча появится в ленте.</div>
-            
+
             <form id="create-meeting-form">
                 <div class="form-group">
                     <label class="form-label" for="meeting-headline">Запись для ленты *</label>
-                    <textarea id="meeting-headline" class="form-textarea" placeholder="Например: Ищем пару человек на вечер настолок — уютно, без спешки." required></textarea>
+                    <textarea id="meeting-headline" class="form-textarea"
+                        placeholder="Например: Ищем пару человек на вечер настолок — уютно, без спешки."
+                        required></textarea>
                     <div class="hint">Эта запись будет видна в ленте как короткое описание.</div>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label" for="meeting-topic">Категория *</label>
                     <select id="meeting-topic" class="form-select" required>
                         <option value="" disabled selected>Выберите тему</option>
                     </select>
                 </div>
-                
+
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label" for="meeting-max-slots">Количество участников *</label>
-                        <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50" placeholder="Например: 6" required>
+                        <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50"
+                            placeholder="Например: 6" required>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="meeting-expires-at">Время жизни *</label>
-                        <div class="expires-grid">
-                            <input type="date" id="meeting-expires-date" class="form-input" required>
-                            <select id="meeting-expires-time" class="form-select" required></select>
+                        <label class="form-label">Время жизни *</label>
+                        <div class="lifetime-options">
+                            <label class="lifetime-option">
+                                <input type="radio" name="meeting-lifetime" value="1" required>
+                                <span>1 час</span>
+                            </label>
+                            <label class="lifetime-option">
+                                <input type="radio" name="meeting-lifetime" value="3" required>
+                                <span>3 часа</span>
+                            </label>
+                            <label class="lifetime-option">
+                                <input type="radio" name="meeting-lifetime" value="6" checked required>
+                                <span>6 часов</span>
+                            </label>
+                            <label class="lifetime-option">
+                                <input type="radio" name="meeting-lifetime" value="12" required>
+                                <span>12 часов</span>
+                            </label>
+                            <label class="lifetime-option">
+                                <input type="radio" name="meeting-lifetime" value="24" required>
+                                <span>24 часа</span>
+                            </label>
                         </div>
-                        <div class="hint" id="expires-hint">Можно выбрать только в пределах 24 часов.</div>
+                        <div class="hint">После истечения времени событие будет автоматически удалено вместе с чатом
+                        </div>
                     </div>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label" for="meeting-city">Город, район *</label>
-                    <input type="text" id="meeting-city" class="form-input" placeholder="Например: Москва, Хамовники" required>
+                    <input type="text" id="meeting-city" class="form-input" placeholder="Например: Москва, Хамовники"
+                        required>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label" for="meeting-details">Подробное описание *</label>
-                    <textarea id="meeting-details" class="form-textarea" placeholder="Расскажи подробнее: правила, формат, что взять с собой и т.д." required></textarea>
+                    <textarea id="meeting-details" class="form-textarea"
+                        placeholder="Расскажи подробнее: правила, формат, что взять с собой и т.д." required></textarea>
                 </div>
-                
+
                 <button type="submit" class="btn">Опубликовать встречу</button>
             </form>
         </div>
     </div>
-    
+
     <div id="notification" class="notification"></div>
 
     <footer class="footer">
         Обратная связь в Telegram:
         <a href="https://t.me/xamixfl" target="_blank" rel="noopener">t.me/xamixfl</a>
     </footer>
-    
+
     <script src="env.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/create-meeting.js"></script>
 </body>
+
 </html>

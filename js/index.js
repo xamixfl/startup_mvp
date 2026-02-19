@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
   populateTopicDropdown();
   await initApp();
+  await window.cleanupExpiredMeetings(); // Cleanup expired meetings
   await loadMeetings();
   setupEventListeners();
   setupGlobalSearch();
@@ -65,18 +66,20 @@ async function initApp() {
 
 function updateUserUI(user) {
   const authButton = document.getElementById('auth-button');
+  const myEventsButton = document.getElementById('my-events-button');
+  const chatButton = document.getElementById('chat-button');
   const userName = document.getElementById('user-name');
   const userAvatar = document.getElementById('user-avatar');
+  const userLink = document.getElementById('user-link');
   const createBtn = document.getElementById('create-meeting-btn');
 
   if (user) {
-    authButton.textContent = 'Выйти';
-    authButton.href = '#';
-    authButton.onclick = (event) => {
-      event.preventDefault();
-      supabaseClient.auth.signOut();
-    };
-
+    if (authButton) authButton.style.display = 'none';
+    if (myEventsButton) {
+      myEventsButton.style.display = 'flex';
+      myEventsButton.href = 'my-events.html';
+    }
+    if (chatButton) chatButton.style.display = 'flex';
     const avatarUrl = currentProfile?.photo_URL && currentProfile?.photo_URL !== 'user'
       ? currentProfile.photo_URL
       : DEFAULT_AVATAR;
@@ -84,35 +87,36 @@ function updateUserUI(user) {
     userAvatar.className = 'user-avatar authenticated';
     userName.textContent = currentProfile?.username || user.email?.split('@')[0] || 'Пользователь';
     if (createBtn) createBtn.href = 'create-meeting.html';
-    userName.style.cursor = 'pointer';
-    userAvatar.style.cursor = 'pointer';
-    userName.onclick = () => {
-      window.location.href = `profile.html?id=${user.id}`;
-    };
-    userAvatar.onclick = () => {
-      window.location.href = `profile.html?id=${user.id}`;
-    };
+    if (userLink) {
+      userLink.href = `profile.html?id=${user.id}`;
+      userLink.style.cursor = 'pointer';
+    }
   } else {
-    authButton.textContent = 'Войти';
-    authButton.href = 'login.html';
-    authButton.onclick = null;
+    if (authButton) {
+      authButton.style.display = 'flex';
+      authButton.textContent = 'Войти';
+      authButton.href = 'login.html';
+    }
+    if (myEventsButton) myEventsButton.style.display = 'none';
+    if (chatButton) chatButton.style.display = 'none';
     userAvatar.innerHTML = `<img src="${DEFAULT_AVATAR}" alt="Гость">`;
     userAvatar.className = 'user-avatar';
     userName.textContent = 'Гость';
     if (createBtn) createBtn.href = 'login.html';
-    userName.style.cursor = 'default';
-    userAvatar.style.cursor = 'default';
-    userName.onclick = null;
-    userAvatar.onclick = null;
+    if (userLink) {
+      userLink.href = '#';
+      userLink.style.cursor = 'default';
+      userLink.onclick = (e) => e.preventDefault();
+    }
   }
 }
 
 function loadFilters() {
   const container = document.getElementById('filter-tags');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.placeholder = 'Поиск тем...';
@@ -147,7 +151,7 @@ function loadFilters() {
 function filterTopicList(searchTerm) {
   const container = document.getElementById('filter-tags');
   const items = container.querySelectorAll('li');
-  
+
   items.forEach(item => {
     const button = item.querySelector('.filter-tag');
     if (button.textContent === 'Все категории') {
@@ -162,12 +166,12 @@ function filterTopicList(searchTerm) {
 function populateTopicDropdown() {
   const select = document.getElementById('meeting-topic');
   if (!select) return;
-  
+
   // Clear existing options except the first one (placeholder)
   while (select.options.length > 1) {
     select.remove(1);
   }
-  
+
   TOPICS.forEach(topic => {
     const option = document.createElement('option');
     option.value = topic.id;
@@ -179,9 +183,9 @@ function populateTopicDropdown() {
 function loadCityFilters() {
   const container = document.getElementById('city-filter-list');
   if (!container) return;
-  
+
   container.innerHTML = '';
-  
+
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.placeholder = 'Поиск города...';
@@ -193,7 +197,7 @@ function loadCityFilters() {
   citiesList.id = 'cities-list';
   citiesList.style.marginTop = '8px';
   citiesList.style.listStyle = 'none';
-  
+
   const allItem = document.createElement('li');
   const allButton = document.createElement('button');
   allButton.className = 'filter-tag active';
@@ -224,7 +228,7 @@ function loadCityFilters() {
 function filterCityList(searchTerm) {
   const listItems = document.querySelectorAll('.city-option');
   const term = searchTerm.toLowerCase();
-  
+
   listItems.forEach(item => {
     const cityName = item.getAttribute('data-city').toLowerCase();
     if (cityName.includes(term)) {
