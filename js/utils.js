@@ -93,34 +93,45 @@ async function deleteExpiredMeeting(meetingId) {
       .maybeSingle();
 
     if (chatsData?.id) {
-      // Delete chat messages
-      const { error: messagesError } = await supabaseClient
+      const { count, error: countError } = await supabaseClient
         .from(TABLES.chat_messages)
-        .delete()
+        .select('id', { count: 'exact', head: true })
         .eq('chat_id', chatsData.id);
 
-      if (messagesError) {
-        console.error(`Ошибка удаления сообщений чата ${chatsData.id}:`, messagesError);
+      if (countError) {
+        console.error(`Ошибка проверки сообщений чата ${chatsData.id}:`, countError);
       }
 
-      // Delete chat members
-      const { error: membersError } = await supabaseClient
-        .from(TABLES.chat_members)
-        .delete()
-        .eq('chat_id', chatsData.id);
+      if (!countError && count === 0) {
+        // Delete chat members
+        const { error: membersError } = await supabaseClient
+          .from(TABLES.chat_members)
+          .delete()
+          .eq('chat_id', chatsData.id);
 
-      if (membersError) {
-        console.error(`Ошибка удаления участников чата ${chatsData.id}:`, membersError);
-      }
+        if (membersError) {
+          console.error(`Ошибка удаления участников чата ${chatsData.id}:`, membersError);
+        }
 
-      // Delete the chat
-      const { error: chatError } = await supabaseClient
-        .from(TABLES.chats)
-        .delete()
-        .eq('id', chatsData.id);
+        // Delete the chat
+        const { error: chatError } = await supabaseClient
+          .from(TABLES.chats)
+          .delete()
+          .eq('id', chatsData.id);
 
-      if (chatError) {
-        console.error(`Ошибка удаления чата ${chatsData.id}:`, chatError);
+        if (chatError) {
+          console.error(`Ошибка удаления чата ${chatsData.id}:`, chatError);
+        }
+      } else {
+        // Keep chat, just detach from meeting
+        const { error: detachError } = await supabaseClient
+          .from(TABLES.chats)
+          .update({ meeting_id: null })
+          .eq('id', chatsData.id);
+
+        if (detachError) {
+          console.error(`Ошибка отвязки чата ${chatsData.id} от встречи:`, detachError);
+        }
       }
     }
 

@@ -133,6 +133,12 @@
       cursor: pointer;
     }
 
+    .typing-indicator {
+      font-size: 12px;
+      color: #64748b;
+      margin-left: 12px;
+    }
+
     .chat-body {
       flex: 1;
       overflow-y: auto;
@@ -172,6 +178,13 @@
       white-space: pre-wrap;
     }
 
+    .message-image {
+      max-width: 240px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      display: block;
+    }
+
     .chat-empty {
       margin: auto;
       color: #94a3b8;
@@ -185,10 +198,11 @@
       display: flex;
       gap: 12px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     .chat-input textarea {
-      flex: 1;
+      flex: 1 1 320px;
       border: 1px solid #e2e8f0;
       border-radius: 12px;
       padding: 10px 12px;
@@ -204,6 +218,75 @@
       border: none;
       border-radius: 12px;
       padding: 10px 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .chat-input .btn-attach {
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #e2e8f0;
+      padding: 10px 12px;
+      font-weight: 700;
+    }
+
+    .chat-input .btn-attach:hover {
+      background: #e2e8f0;
+    }
+
+    .image-preview {
+      width: 100%;
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      background: #f8fafc;
+    }
+
+    .image-preview img {
+      width: 64px;
+      height: 64px;
+      border-radius: 10px;
+      object-fit: cover;
+      border: 1px solid #e2e8f0;
+    }
+
+    .image-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 3000;
+      padding: 20px;
+    }
+
+    .image-modal img {
+      max-width: 92vw;
+      max-height: 92vh;
+      border-radius: 16px;
+      background: white;
+      border: 1px solid #e2e8f0;
+    }
+
+    .image-preview .preview-name {
+      flex: 1;
+      font-size: 12px;
+      color: #475569;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .image-preview .preview-remove {
+      border: none;
+      background: #fee2e2;
+      color: #b91c1c;
+      border-radius: 8px;
+      padding: 6px 10px;
       font-weight: 700;
       cursor: pointer;
     }
@@ -260,6 +343,41 @@
     .info-age {
       font-size: 13px;
       color: #64748b;
+    }
+
+    .info-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 8px;
+      width: 100%;
+    }
+
+    .info-btn {
+      flex: 1;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .info-btn.secondary {
+      background: #f1f5f9;
+      color: #475569;
+    }
+
+    .info-btn.secondary:hover {
+      background: #e2e8f0;
+    }
+
+    .info-btn.danger {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .info-btn.danger:hover {
+      background: #fecaca;
     }
 
     .meeting-card {
@@ -356,13 +474,23 @@
 
     <main class="main">
       <div class="chat-header">
-        <div class="chat-title" id="chat-title">Выберите чат</div>
+        <div style="display:flex; align-items:center;">
+          <div class="chat-title" id="chat-title">Выберите чат</div>
+          <div class="typing-indicator" id="typing-indicator" style="display:none;">Собеседник печатает...</div>
+        </div>
         <a href="index.html" class="info-link">К ленте</a>
       </div>
       <div class="chat-body" id="chat-body">
         <div class="chat-empty">Нет выбранного чата</div>
       </div>
       <div class="chat-input">
+        <input id="chat-image-input" type="file" accept="image/*" style="display: none;">
+        <button id="chat-attach" class="btn-attach" type="button">Фото</button>
+        <div class="image-preview" id="image-preview">
+          <img id="image-preview-img" src="" alt="preview">
+          <div class="preview-name" id="image-preview-name"></div>
+          <button class="preview-remove" type="button" id="image-preview-remove">Убрать</button>
+        </div>
         <textarea id="chat-input" placeholder="Сообщение..." disabled></textarea>
         <button id="chat-send" disabled>Отправить</button>
       </div>
@@ -371,6 +499,10 @@
     <aside class="info-panel" id="info-panel">
       <div class="info-content" id="info-content"></div>
     </aside>
+  </div>
+
+  <div class="image-modal" id="image-modal">
+    <img id="image-modal-img" src="" alt="image">
   </div>
 
   <script src="env.js"></script>

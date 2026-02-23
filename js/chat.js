@@ -8,6 +8,13 @@ let TOPICS = null;
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
 const UNREAD_KEY = 'meetup_chat_last_read';
+const CHAT_BUCKET = 'chat-media';
+let listChannel = null;
+let typingChannel = null;
+let typingTimeoutId = null;
+let typingHideTimeoutId = null;
+let pendingImageFile = null;
+const MAX_IMAGE_MB = 5;
 
 document.addEventListener('DOMContentLoaded', async () => {
   const { data: { user } } = await supabaseClient.auth.getUser();
@@ -23,6 +30,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupChatSelectionFromUrl();
   await loadChats();
   setupSendMessage();
+  setupImageUpload();
+  setupTypingIndicator();
+  setupImageModal();
   setupTitleToggle();
 });
 
@@ -153,6 +163,10 @@ async function loadChats() {
     await cleanupEmptyDirectChats(new Set(refreshedIds), currentChat?.id);
     console.log('✅ Step 8 OK');
 
+    console.log('Step 8.1: Calculating unread counts');
+    await applyUnreadCounts(mergedIds);
+    console.log('✅ Step 8.1 OK');
+
     console.log('Step 9: Sorting chats');
     sortChatsByLastActivity();
     console.log('✅ Step 9 OK');
@@ -160,6 +174,8 @@ async function loadChats() {
     console.log('Step 10: Rendering chat list');
     renderChatList();
     console.log('✅ Step 10 OK - Rendered', chats.length, 'chats');
+
+    setupRealtimeSubscriptions(mergedIds);
 
     if (pendingOpenChatId) {
       const chat = chats.find(c => c.id === pendingOpenChatId);
@@ -181,17 +197,19 @@ function renderChatList() {
     const item = document.createElement('div');
     item.className = 'chat-item';
     item.dataset.chatId = chat.id;
-    const title = chat.meeting_id ? chat.title : (chat.display_title || chat.title);
-    const isUnread = isChatUnread(chat);
-    item.innerHTML = `
-      <div class="chat-item-row">
-        <div class="chat-item-title">${title}</div>
-        ${isUnread ? '<div class="chat-unread">●</div>' : ''}
-      </div>
-      <div class="chat-item-sub">${chat.meeting_id ? 'Чат встречи' : 'Личный чат'}</div>
-    `;
-    item.onclick = () => openChat(chat);
-    list.appendChild(item);
+  const title = chat.meeting_id ? chat.title : (chat.display_title || chat.title);
+  const isUnread = isChatUnread(chat);
+  const unreadCount = chat.unread_count || 0;
+  const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
+  item.innerHTML = `
+    <div class="chat-item-row">
+      <div class="chat-item-title">${title}</div>
+      ${isUnread ? `<div class="chat-unread">${unreadLabel}</div>` : ''}
+    </div>
+    <div class="chat-item-sub">${chat.meeting_id ? 'Чат встречи' : 'Личный чат'}</div>
+  `;
+  item.onclick = () => openChat(chat);
+  list.appendChild(item);
   });
 }
 
@@ -221,6 +239,7 @@ async function openChat(chat) {
   if (!chat.meeting_id && chat.display_title) {
     titleEl.textContent = chat.display_title;
   }
+  setupChatTypingChannel(chat.id);
   await loadMessages(chat.id);
   markChatRead(chat);
   renderChatList();
@@ -320,13 +339,33 @@ async function loadMessages(chatId) {
     if (msg.user_id === currentUser.id) {
       bubble.classList.add('mine');
     }
-    bubble.innerHTML = `
-      <div class="message-author">${name}</div>
-      <div class="message-text">${msg.content}</div>
-    `;
+    const isImage = typeof msg.content === 'string' && msg.content.startsWith('image:');
+    if (isImage) {
+      const imageUrl = msg.content.slice('image:'.length).trim();
+      bubble.innerHTML = `
+        <div class="message-author">${name}</div>
+        <img class="message-image" src="${imageUrl}" alt="image" data-full="${imageUrl}">
+      `;
+    } else {
+      bubble.innerHTML = `
+        <div class="message-author">${name}</div>
+        <div class="message-text">${msg.content}</div>
+      `;
+    }
     body.appendChild(bubble);
   });
   body.scrollTop = body.scrollHeight;
+
+  const modal = document.getElementById('image-modal');
+  const modalImg = document.getElementById('image-modal-img');
+  if (modal && modalImg) {
+    body.querySelectorAll('.message-image').forEach(img => {
+      img.addEventListener('click', () => {
+        modalImg.src = img.getAttribute('data-full') || img.src;
+        modal.style.display = 'flex';
+      });
+    });
+  }
 }
 
 async function applyLastMessageMeta(chatIds) {
@@ -392,6 +431,138 @@ function isChatUnread(chat) {
   return Date.parse(chat.last_message_at) > Date.parse(lastRead);
 }
 
+async function applyUnreadCounts(chatIds) {
+  if (!chatIds || chatIds.length === 0) return;
+  const map = getReadMap();
+  const countsById = new Map();
+
+  for (const chatId of chatIds) {
+    const lastRead = map[getChatReadKey(chatId)];
+    let query = supabaseClient
+      .from(TABLES.chat_messages)
+      .select('id', { count: 'exact', head: true })
+      .eq('chat_id', chatId);
+    if (lastRead) {
+      query = query.gt('created_at', lastRead);
+    }
+    const { count, error } = await query;
+    if (error) {
+      continue;
+    }
+    countsById.set(chatId, count || 0);
+  }
+
+  chats.forEach(chat => {
+    chat.unread_count = countsById.get(chat.id) || 0;
+  });
+}
+
+function setupRealtimeSubscriptions(chatIds) {
+  if (!supabaseClient || !chatIds || chatIds.length === 0) return;
+  if (listChannel) {
+    supabaseClient.removeChannel(listChannel);
+    listChannel = null;
+  }
+
+  const filterIds = chatIds.join(',');
+  listChannel = supabaseClient
+    .channel('chat-list-updates')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: TABLES.chat_messages, filter: `chat_id=in.(${filterIds})` },
+      payload => handleMessageRealtime(payload)
+    )
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: TABLES.chat_members, filter: `user_id=eq.${currentUser.id}` },
+      () => loadChats()
+    )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: TABLES.chat_members, filter: `user_id=eq.${currentUser.id}` },
+      () => loadChats()
+    )
+    .subscribe();
+}
+
+function handleMessageRealtime(payload) {
+  const msg = payload?.new;
+  if (!msg?.chat_id) return;
+  const chat = chats.find(c => c.id === msg.chat_id);
+  if (chat) {
+    chat.last_message_at = msg.created_at || new Date().toISOString();
+    if (currentChat && currentChat.id === msg.chat_id) {
+      chat.unread_count = 0;
+    } else {
+      chat.unread_count = (chat.unread_count || 0) + 1;
+    }
+  }
+  sortChatsByLastActivity();
+  if (currentChat && currentChat.id === msg.chat_id) {
+    loadMessages(currentChat.id);
+    markChatRead(currentChat);
+  }
+  renderChatList();
+}
+
+async function leaveChatFromList(chatId) {
+  if (!chatId) return;
+  const confirmLeave = confirm('Покинуть этот чат?');
+  if (!confirmLeave) return;
+
+  const { error } = await supabaseClient
+    .from(TABLES.chat_members)
+    .delete()
+    .eq('chat_id', chatId)
+    .eq('user_id', currentUser.id);
+
+  if (error) {
+    alert('Не удалось покинуть чат');
+    console.error('Ошибка выхода из чата:', error);
+    return;
+  }
+
+  removeChatFromList(chatId);
+}
+
+async function deletePersonalChat(chatId) {
+  if (!chatId) return;
+  const confirmDelete = confirm('Удалить этот личный чат у себя?');
+  if (!confirmDelete) return;
+
+  const { error } = await supabaseClient
+    .from(TABLES.chat_members)
+    .delete()
+    .eq('chat_id', chatId)
+    .eq('user_id', currentUser.id);
+
+  if (error) {
+    alert('Не удалось удалить чат');
+    console.error('Ошибка удаления личного чата:', error);
+    return;
+  }
+
+  removeChatFromList(chatId);
+}
+
+function removeChatFromList(chatId) {
+  chats = chats.filter(chat => chat.id !== chatId);
+  if (currentChat?.id === chatId) {
+    currentChat = null;
+    const titleEl = document.getElementById('chat-title');
+    const body = document.getElementById('chat-body');
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send');
+    if (titleEl) titleEl.textContent = 'Выберите чат';
+    if (body) body.innerHTML = '<div class="chat-empty">Нет выбранного чата</div>';
+    if (input) input.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+    const infoContent = document.getElementById('info-content');
+    if (infoContent) infoContent.innerHTML = '';
+  }
+  renderChatList();
+}
+
 async function cleanupEmptyDirectChats(approvedSet, openedChatId) {
   if (!chats.length) return;
   try {
@@ -436,9 +607,23 @@ function setupSendMessage() {
 
   sendBtn.onclick = async () => {
     const text = input.value.trim();
-    if (!text || !currentChat) return;
+    if (!currentChat) return;
+    if (!text && !pendingImageFile) return;
 
     await ensureDirectPeer(currentChat);
+
+    if (pendingImageFile) {
+      const fileToSend = pendingImageFile;
+      pendingImageFile = null;
+      const preview = document.getElementById('image-preview');
+      const previewImg = document.getElementById('image-preview-img');
+      const previewName = document.getElementById('image-preview-name');
+      if (preview) preview.style.display = 'none';
+      if (previewImg) previewImg.src = '';
+      if (previewName) previewName.textContent = '';
+      await uploadAndSendImage(fileToSend);
+      if (!text) return;
+    }
 
     const { error } = await supabaseClient
       .from(TABLES.chat_messages)
@@ -459,6 +644,165 @@ function setupSendMessage() {
       sendBtn.click();
     }
   });
+}
+
+function setupImageUpload() {
+  const attachBtn = document.getElementById('chat-attach');
+  const fileInput = document.getElementById('chat-image-input');
+  const preview = document.getElementById('image-preview');
+  const previewImg = document.getElementById('image-preview-img');
+  const previewName = document.getElementById('image-preview-name');
+  const previewRemove = document.getElementById('image-preview-remove');
+  if (!attachBtn || !fileInput) return;
+
+  attachBtn.onclick = () => {
+    if (!currentChat) return;
+    fileInput.click();
+  };
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file || !currentChat) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Можно загружать только изображения');
+      fileInput.value = '';
+      return;
+    }
+    const maxBytes = MAX_IMAGE_MB * 1024 * 1024;
+    if (file.size > maxBytes) {
+      alert(`Максимальный размер изображения — ${MAX_IMAGE_MB} МБ`);
+      fileInput.value = '';
+      return;
+    }
+    pendingImageFile = file;
+    if (preview && previewImg && previewName) {
+      previewImg.src = URL.createObjectURL(file);
+      previewName.textContent = file.name;
+      preview.style.display = 'flex';
+    }
+  });
+
+  if (previewRemove) {
+    previewRemove.onclick = () => {
+      pendingImageFile = null;
+      if (preview) preview.style.display = 'none';
+      if (previewImg) previewImg.src = '';
+      if (previewName) previewName.textContent = '';
+      if (fileInput) fileInput.value = '';
+    };
+  }
+}
+
+async function uploadAndSendImage(file) {
+  if (!currentChat) return;
+  const ext = file.name.split('.').pop() || 'jpg';
+  const safeExt = ext.replace(/[^a-z0-9]/gi, '');
+  const path = `${currentUser.id}/${currentChat.id}/${Date.now()}.${safeExt || 'jpg'}`;
+
+  const { error: uploadError } = await supabaseClient
+    .storage
+    .from(CHAT_BUCKET)
+    .upload(path, file, { cacheControl: '3600', upsert: false });
+
+  if (uploadError) {
+    console.error('Ошибка загрузки изображения:', uploadError);
+    alert(`Не удалось загрузить изображение: ${uploadError.message || uploadError.error || 'Ошибка'}`);
+    return;
+  }
+
+  const { data: publicData } = supabaseClient
+    .storage
+    .from(CHAT_BUCKET)
+    .getPublicUrl(path);
+
+  const imageUrl = publicData?.publicUrl;
+  if (!imageUrl) {
+    alert('Не удалось получить ссылку на изображение');
+    return;
+  }
+
+  await ensureDirectPeer(currentChat);
+
+  const { error } = await supabaseClient
+    .from(TABLES.chat_messages)
+    .insert([{ chat_id: currentChat.id, user_id: currentUser.id, content: `image:${imageUrl}` }]);
+
+  if (error) {
+    console.error('Ошибка отправки изображения:', error);
+    alert('Изображение не отправлено');
+    return;
+  }
+
+  await loadMessages(currentChat.id);
+}
+
+function setupImageModal() {
+  const modal = document.getElementById('image-modal');
+  const modalImg = document.getElementById('image-modal-img');
+  const previewImg = document.getElementById('image-preview-img');
+  if (!modal || !modalImg) return;
+
+  if (previewImg) {
+    previewImg.addEventListener('click', () => {
+      if (!previewImg.src) return;
+      modalImg.src = previewImg.src;
+      modal.style.display = 'flex';
+    });
+  }
+
+  modal.addEventListener('click', () => {
+    modal.style.display = 'none';
+    modalImg.src = '';
+  });
+}
+
+function setupTypingIndicator() {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+
+  input.addEventListener('input', () => {
+    if (!currentChat || !typingChannel) return;
+    typingChannel.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { user_id: currentUser.id, chat_id: currentChat.id }
+    });
+    if (typingTimeoutId) clearTimeout(typingTimeoutId);
+    typingTimeoutId = setTimeout(() => {
+      typingChannel.send({
+        type: 'broadcast',
+        event: 'stop_typing',
+        payload: { user_id: currentUser.id, chat_id: currentChat.id }
+      });
+    }, 1500);
+  });
+}
+
+function setupChatTypingChannel(chatId) {
+  const indicator = document.getElementById('typing-indicator');
+  if (typingChannel) {
+    supabaseClient.removeChannel(typingChannel);
+    typingChannel = null;
+  }
+
+  if (!chatId) return;
+  typingChannel = supabaseClient
+    .channel(`typing:${chatId}`)
+    .on('broadcast', { event: 'typing' }, payload => {
+      if (!indicator) return;
+      if (payload?.payload?.user_id === currentUser.id) return;
+      indicator.style.display = 'inline';
+      if (typingHideTimeoutId) clearTimeout(typingHideTimeoutId);
+      typingHideTimeoutId = setTimeout(() => {
+        indicator.style.display = 'none';
+      }, 2000);
+    })
+    .on('broadcast', { event: 'stop_typing' }, payload => {
+      if (!indicator) return;
+      if (payload?.payload?.user_id === currentUser.id) return;
+      indicator.style.display = 'none';
+    })
+    .subscribe();
 }
 
 async function ensureDirectPeer(chat) {
@@ -586,6 +930,16 @@ async function loadChatInfo(chat) {
       list.appendChild(row);
     });
     infoContent.appendChild(list);
+
+    if (chat.owner_id !== currentUser.id) {
+      const actions = document.createElement('div');
+      actions.className = 'info-actions';
+      actions.innerHTML = `
+        <button class="info-btn danger" type="button">Покинуть чат</button>
+      `;
+      actions.querySelector('button').onclick = () => leaveChatFromList(chat.id);
+      infoContent.appendChild(actions);
+    }
   } else {
     const peerId = chat._peerId
       || (chat.owner_id && chat.owner_id !== currentUser.id ? chat.owner_id : null);
@@ -608,6 +962,14 @@ async function loadChatInfo(chat) {
       <div class="info-age">${age}</div>
     `;
     infoContent.appendChild(card);
+
+    const actions = document.createElement('div');
+    actions.className = 'info-actions';
+    actions.innerHTML = `
+      <button class="info-btn danger" type="button">Удалить чат</button>
+    `;
+    actions.querySelector('button').onclick = () => deletePersonalChat(chat.id);
+    infoContent.appendChild(actions);
   }
 }
 

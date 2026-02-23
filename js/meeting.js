@@ -112,10 +112,12 @@ async function setupChatState(meeting, user) {
   const leaveBtn = document.getElementById('leave-chat-btn');
   const requestsCard = document.getElementById('requests-card');
   const requestsList = document.getElementById('requests-list');
+  const joinButton = document.getElementById('join-button');
 
   if (!meeting.chat_id || !user) {
     if (statusCard) statusCard.style.display = 'none';
     if (requestsCard) requestsCard.style.display = 'none';
+    if (joinButton) joinButton.style.display = '';
     return;
   }
 
@@ -130,24 +132,30 @@ async function setupChatState(meeting, user) {
     statusCard.style.display = 'block';
     if (!membership) {
       statusText.textContent = 'Вы не отправляли заявку.';
+      if (joinButton) joinButton.style.display = '';
     } else if (membership.status === 'pending') {
       statusText.textContent = 'Заявка отправлена, ожидает одобрения.';
+      if (joinButton) joinButton.style.display = 'none';
     } else if (membership.status === 'approved') {
       statusText.textContent = 'Вы участник чата.';
+      if (joinButton) joinButton.style.display = 'none';
       if (openBtn) {
         openBtn.style.display = 'block';
         openBtn.onclick = () => {
           window.location.href = `chat.html?chat_id=${meeting.chat_id}`;
         };
       }
-      if (leaveBtn) {
+      if (leaveBtn && meeting.creator_id !== user.id) {
         leaveBtn.style.display = 'block';
         leaveBtn.onclick = async () => {
           await leaveChat(meeting, user);
         };
+      } else if (leaveBtn) {
+        leaveBtn.style.display = 'none';
       }
     } else if (membership.status === 'rejected') {
       statusText.textContent = 'Заявка отклонена.';
+      if (joinButton) joinButton.style.display = 'none';
     }
   }
 
@@ -276,6 +284,8 @@ async function rejectRequest(meeting, userId) {
 }
 
 async function leaveChat(meeting, user) {
+  const confirmLeave = confirm('Покинуть чат встречи?');
+  if (!confirmLeave) return;
   const { error } = await supabaseClient
     .from(TABLES.chat_members)
     .delete()
