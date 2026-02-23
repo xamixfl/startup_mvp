@@ -2,11 +2,14 @@ const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
 let isSubmitting = false;
 let editingMeetingId = null;
+const MAX_LIFETIME_HOURS = 24;
+const TIME_STEP_MINUTES = 15;
 
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('create-meeting.js loaded');
   await populateTopicDropdown();
   await checkAuthOrRedirect();
+  setupExpiresInputs();
 
   // Check if we're editing an existing meeting
   const urlParams = new URLSearchParams(window.location.search);
@@ -22,6 +25,67 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('create-meeting-form').addEventListener('submit', handleCreateMeeting);
 });
+
+function setupExpiresInputs() {
+  const dateInput = document.getElementById('meeting-expires-date');
+  const timeSelect = document.getElementById('meeting-expires-time');
+  if (!dateInput || !timeSelect) return;
+
+  const now = new Date();
+  const max = new Date(now.getTime() + MAX_LIFETIME_HOURS * 60 * 60 * 1000);
+  dateInput.min = now.toISOString().slice(0, 10);
+  dateInput.max = max.toISOString().slice(0, 10);
+  if (!dateInput.value) {
+    dateInput.value = now.toISOString().slice(0, 10);
+  }
+
+  const populateTimes = () => {
+    timeSelect.innerHTML = '';
+    const selectedDate = new Date(`${dateInput.value}T00:00:00`);
+    const start = new Date(selectedDate);
+    const end = new Date(selectedDate);
+
+    if (dateInput.value === now.toISOString().slice(0, 10)) {
+      start.setHours(now.getHours(), now.getMinutes(), 0, 0);
+      const minutes = start.getMinutes();
+      const rounded = Math.ceil(minutes / TIME_STEP_MINUTES) * TIME_STEP_MINUTES;
+      start.setMinutes(rounded);
+    } else {
+      start.setHours(0, 0, 0, 0);
+    }
+
+    if (dateInput.value === max.toISOString().slice(0, 10)) {
+      end.setHours(max.getHours(), max.getMinutes(), 0, 0);
+    } else {
+      end.setHours(23, 59, 0, 0);
+    }
+
+    if (end < start) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Нет доступного времени';
+      timeSelect.appendChild(option);
+      timeSelect.disabled = true;
+      return;
+    }
+
+    timeSelect.disabled = false;
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      const hours = String(cursor.getHours()).padStart(2, '0');
+      const mins = String(cursor.getMinutes()).padStart(2, '0');
+      const value = `${hours}:${mins}`;
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      timeSelect.appendChild(option);
+      cursor.setMinutes(cursor.getMinutes() + TIME_STEP_MINUTES);
+    }
+  };
+
+  populateTimes();
+  dateInput.addEventListener('change', populateTimes);
+}
 
 async function populateTopicDropdown() {
   const select = document.getElementById('meeting-topic');
@@ -66,18 +130,27 @@ function handleCreateMeeting(event) {
   const headline = document.getElementById('meeting-headline').value.trim();
   const topic = document.getElementById('meeting-topic').value;
   const maxSlots = parseInt(document.getElementById('meeting-max-slots').value);
-  const lifetimeHours = parseInt(document.querySelector('input[name="meeting-lifetime"]:checked')?.value);
   const city = document.getElementById('meeting-city').value.trim();
   const details = document.getElementById('meeting-details').value.trim();
+  const dateValue = document.getElementById('meeting-expires-date')?.value;
+  const timeValue = document.getElementById('meeting-expires-time')?.value;
 
-  if (!headline || !topic || !maxSlots || !lifetimeHours || !city || !details) {
+  if (!headline || !topic || !maxSlots || !city || !details || !dateValue || !timeValue) {
     showNotification('Заполните все обязательные поля');
     return;
   }
 
-  // Calculate expiration date based on selected lifetime
   const now = new Date();
-  const expires = new Date(now.getTime() + lifetimeHours * 60 * 60 * 1000);
+  const expires = new Date(`${dateValue}T${timeValue}:00`);
+  const diffMs = expires.getTime() - now.getTime();
+  if (Number.isNaN(expires.getTime()) || diffMs <= 0) {
+    showNotification('Выберите корректное время жизни');
+    return;
+  }
+  if (diffMs > MAX_LIFETIME_HOURS * 60 * 60 * 1000) {
+    showNotification('Можно выбрать только в пределах 24 часов');
+    return;
+  }
 
   const meetingData = {
     title: headline,
@@ -287,29 +360,17 @@ async function loadMeetingForEdit(meetingId) {
 
     console.log('Form fields populated');
 
-    // Calculate remaining lifetime and select closest option
+    // Set expiration date/time based on saved meeting
     if (meeting.expires_at) {
       const expiresDate = new Date(meeting.expires_at);
-      const now = new Date();
-      const remainingHours = Math.round((expiresDate - now) / (1000 * 60 * 60));
-
-      // Find the closest lifetime option
-      const options = [1, 3, 6, 12, 24];
-      let closestOption = 6; // default
-      let minDiff = Infinity;
-
-      for (const option of options) {
-        const diff = Math.abs(option - remainingHours);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestOption = option;
-        }
-      }
-
-      // Set the radio button
-      const radioButton = document.querySelector(`input[name="meeting-lifetime"][value="${closestOption}"]`);
-      if (radioButton) {
-        radioButton.checked = true;
+      const dateInput = document.getElementById('meeting-expires-date');
+      const timeSelect = document.getElementById('meeting-expires-time');
+      if (dateInput && timeSelect) {
+        dateInput.value = expiresDate.toISOString().slice(0, 10);
+        setupExpiresInputs();
+        const hours = String(expiresDate.getHours()).padStart(2, '0');
+        const minutes = String(expiresDate.getMinutes()).padStart(2, '0');
+        timeSelect.value = `${hours}:${minutes}`;
       }
     }
 

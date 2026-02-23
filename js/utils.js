@@ -37,6 +37,12 @@ async function cleanupExpiredMeetings() {
   }
 
   try {
+    const { error: rpcError } = await supabaseClient.rpc('purge_expired_meetings');
+    if (!rpcError) {
+      console.log('Автоочистка: выполнена через purge_expired_meetings()');
+      return;
+    }
+
     // Find all expired meetings
     const { data: expiredMeetings, error: fetchError } = await supabaseClient
       .from(TABLES.meetings)
