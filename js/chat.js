@@ -30,87 +30,145 @@ async function loadChats() {
   const list = document.getElementById('chat-list');
   if (!list) return;
 
-  const { data: memberships, error } = await supabaseClient
-    .from(TABLES.chat_members)
-    .select('chat_id, status')
-    .eq('user_id', currentUser.id)
-    .eq('status', 'approved');
+  let refreshedIds = [];
+  let mergedIds = [];
 
-  if (error) {
-    console.error('Ошибка загрузки chat_members:', error);
-    list.innerHTML = '<div class="chat-item">Ошибка загрузки чатов</div>';
-    return;
-  }
-
-  const memberChatIds = (memberships || []).map(m => m.chat_id);
-  console.log('chat_members approved ids:', memberChatIds);
-  const { data: ownedChats, error: ownedError } = await supabaseClient
-    .from(TABLES.chats)
-    .select('id, title, meeting_id, owner_id, created_at')
-    .eq('owner_id', currentUser.id)
-    .order('created_at', { ascending: false });
-  if (ownedError) {
-    console.error('Ошибка загрузки chats:', ownedError);
-  }
-  console.log('owned chat ids:', (ownedChats || []).map(c => c.id));
-
-  const ownedIds = (ownedChats || []).map(c => c.id);
-  const missingOwner = ownedIds.filter(id => !memberChatIds.includes(id));
-  if (missingOwner.length > 0) {
-    const { error: insertOwnerError } = await supabaseClient
+  try {
+    console.log('Step 1: Fetching chat_members for user:', currentUser.id);
+    const { data: memberships, error } = await supabaseClient
       .from(TABLES.chat_members)
-      .insert(missingOwner.map(chatId => ({
-        chat_id: chatId,
-        user_id: currentUser.id,
-        role: 'owner',
-        status: 'approved'
-      })));
-    if (insertOwnerError) {
-      console.error('Ошибка добавления владельца в chat_members:', insertOwnerError);
+      .select('chat_id, status')
+      .eq('user_id', currentUser.id)
+      .eq('status', 'approved');
+
+    if (error) {
+      console.error('❌ Step 1 FAILED - Ошибка загрузки chat_members:', error);
+      console.error('   Error code:', error.code);
+      console.error('   Error message:', error.message);
+      list.innerHTML = '<div class="chat-item">❌ Ошибка: ' + error.message + '</div>';
+      return;
     }
-  }
 
-  const { data: refreshed, error: refreshedError } = await supabaseClient
-    .from(TABLES.chat_members)
-    .select('chat_id, status')
-    .eq('user_id', currentUser.id)
-    .eq('status', 'approved');
-  if (refreshedError) {
-    console.error('Ошибка повторной загрузки chat_members:', refreshedError);
-  }
+    const memberChatIds = (memberships || []).map(m => m.chat_id);
+    console.log('✅ Step 1 OK - Found member chats:', memberChatIds);
 
-  const refreshedIds = (refreshed || []).map(m => m.chat_id);
-  const mergedIds = Array.from(new Set([...refreshedIds, ...ownedIds]));
-  console.log('merged chat ids:', mergedIds);
+    console.log('Step 2: Fetching owned chats');
+    const { data: ownedChats, error: ownedError } = await supabaseClient
+      .from(TABLES.chats)
+      .select('id, title, meeting_id, owner_id, created_at')
+      .eq('owner_id', currentUser.id)
+      .order('created_at', { ascending: false });
 
-  if (mergedIds.length === 0) {
-    list.innerHTML = '<div class="chat-item">Нет чатов</div>';
+    if (ownedError) {
+      console.error('❌ Step 2 FAILED - Ошибка загрузки chats:', ownedError);
+      console.error('   Error code:', ownedError.code);
+      console.error('   Error message:', ownedError.message);
+    } else {
+      console.log('✅ Step 2 OK - Found owned chats:', (ownedChats || []).map(c => c.id));
+    }
+
+    const ownedIds = (ownedChats || []).map(c => c.id);
+    const missingOwner = ownedIds.filter(id => !memberChatIds.includes(id));
+
+    if (missingOwner.length > 0) {
+      console.log('Step 3: Adding owner to missing chat_members records');
+      const { error: insertOwnerError } = await supabaseClient
+        .from(TABLES.chat_members)
+        .insert(missingOwner.map(chatId => ({
+          chat_id: chatId,
+          user_id: currentUser.id,
+          role: 'owner',
+          status: 'approved'
+        })));
+      if (insertOwnerError) {
+        console.error('❌ Step 3 FAILED - Ошибка добавления владельца:', insertOwnerError);
+      } else {
+        console.log('✅ Step 3 OK - Owner added to', missingOwner.length, 'chats');
+      }
+    }
+
+    console.log('Step 4: Refreshing chat_members list');
+    const { data: refreshed, error: refreshedError } = await supabaseClient
+      .from(TABLES.chat_members)
+      .select('chat_id, status')
+      .eq('user_id', currentUser.id)
+      .eq('status', 'approved');
+
+    if (refreshedError) {
+      console.error('❌ Step 4 FAILED:', refreshedError);
+    } else {
+      console.log('✅ Step 4 OK - Refreshed member chats:', (refreshed || []).map(m => m.chat_id));
+    }
+
+    refreshedIds = (refreshed || []).map(m => m.chat_id);
+    mergedIds = Array.from(new Set([...refreshedIds, ...ownedIds]));
+    console.log('Merged chat IDs:', mergedIds);
+
+    if (mergedIds.length === 0) {
+      list.innerHTML = '<div class="chat-item">Нет чатов</div>';
+      return;
+    }
+
+    console.log('Step 5: Fetching chat details for IDs:', mergedIds);
+    const { data: chatsData, error: chatsError } = await supabaseClient
+      .from(TABLES.chats)
+      .select('id, title, meeting_id, owner_id, created_at, peer_id')
+      .in('id', mergedIds)
+      .order('created_at', { ascending: false });
+
+    if (chatsError) {
+      console.error('❌ Step 5 FAILED - Ошибка выборки чатов:', chatsError);
+      console.error('   Error code:', chatsError.code);
+      console.error('   Error message:', chatsError.message);
+      list.innerHTML = '<div class="chat-item">❌ Ошибка: ' + chatsError.message + '</div>';
+      return;
+    }
+
+    console.log('✅ Step 5 OK - Found', chatsData.length, 'chats');
+    chats = chatsData || [];
+  } catch (err) {
+    console.error('❌ UNEXPECTED ERROR:', err);
+    const list = document.getElementById('chat-list');
+    if (list) {
+      list.innerHTML = '<div class="chat-item">❌ Неожиданная ошибка: ' + err.message + '</div>';
+    }
     return;
   }
 
-  const { data: chatsData, error: chatsError } = await supabaseClient
-    .from(TABLES.chats)
-    .select('id, title, meeting_id, owner_id, created_at, peer_id')
-    .in('id', mergedIds)
-    .order('created_at', { ascending: false });
-  if (chatsError) {
-    console.error('Ошибка выборки чатов по id:', chatsError);
-  }
-
-  chats = chatsData || [];
   if (mergedIds.length > 0 && chats.length === 0) {
     list.innerHTML = '<div class="chat-item">Нет доступа к чатам (RLS)</div>';
     return;
   }
-  await applyLastMessageMeta(mergedIds);
-  await enrichDirectChatTitles();
-  await cleanupEmptyDirectChats(new Set(refreshedIds), currentChat?.id);
-  sortChatsByLastActivity();
-  renderChatList();
-  if (pendingOpenChatId) {
-    const chat = chats.find(c => c.id === pendingOpenChatId);
-    if (chat) openChat(chat);
-    pendingOpenChatId = null;
+
+  try {
+    console.log('Step 6: Processing chat metadata');
+    await applyLastMessageMeta(mergedIds);
+    console.log('✅ Step 6 OK');
+
+    console.log('Step 7: Enriching direct chat titles');
+    await enrichDirectChatTitles();
+    console.log('✅ Step 7 OK');
+
+    console.log('Step 8: Cleaning up empty direct chats');
+    await cleanupEmptyDirectChats(new Set(refreshedIds), currentChat?.id);
+    console.log('✅ Step 8 OK');
+
+    console.log('Step 9: Sorting chats');
+    sortChatsByLastActivity();
+    console.log('✅ Step 9 OK');
+
+    console.log('Step 10: Rendering chat list');
+    renderChatList();
+    console.log('✅ Step 10 OK - Rendered', chats.length, 'chats');
+
+    if (pendingOpenChatId) {
+      const chat = chats.find(c => c.id === pendingOpenChatId);
+      if (chat) openChat(chat);
+      pendingOpenChatId = null;
+    }
+  } catch (err) {
+    console.error('❌ Error in chat processing steps:', err);
+    list.innerHTML = '<div class="chat-item">❌ Ошибка обработки чатов: ' + err.message + '</div>';
   }
 }
 
