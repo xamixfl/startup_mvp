@@ -9,6 +9,16 @@ let usernameCheckTimeout = null;
 // Categories will be fetched from database
 let CATEGORIES = [];
 
+function buildSafeAvatarPath(userId, file) {
+  const fallbackExt = 'jpg';
+  const byName = (file?.name || '').split('.').pop() || '';
+  const byType = (file?.type || '').split('/').pop() || '';
+  const rawExt = (byName || byType || fallbackExt).toLowerCase();
+  const ext = rawExt.replace(/[^a-z0-9]/g, '') || fallbackExt;
+  // Storage key must be URL-safe; avoid spaces/cyrillic/special chars in filename.
+  return `avatars/${userId}/${Date.now()}.${ext}`;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   CATEGORIES = await window.fetchTopics();
   initCategories();
@@ -201,7 +211,7 @@ async function validateStep3() {
 
     let publicUrl = 'user';
     if (avatarFile) {
-      const avatarPath = `avatars/${userId}/${Date.now()}_${avatarFile.name}`;
+      const avatarPath = buildSafeAvatarPath(userId, avatarFile);
       const { error: uploadError } = await supabaseClient.storage
         .from('profiles')
         .upload(avatarPath, avatarFile, {
@@ -234,13 +244,10 @@ async function validateStep3() {
 
     if (profileError) throw profileError;
 
-    document.getElementById('confirmation-text').innerHTML = `
-      Мы отправили письмо с подтверждением на <strong>${email}</strong>.<br><br>
-      Пожалуйста, проверьте почту и перейдите по ссылке в письме, чтобы активировать аккаунт.<br><br>
-      <small style="color: #94a3b8;">Письмо может попасть в спам</small>
-    `;
-
-    goToStep(4);
+    showNotification('Аккаунт создан', 'success');
+    setTimeout(() => {
+      window.location.href = 'index.html';
+    }, 500);
   } catch (error) {
     console.error('Ошибка регистрации:', error);
     if (error?.message?.includes('User already registered')) {
