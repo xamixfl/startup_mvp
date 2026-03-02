@@ -3,17 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meetup — Вход</title>
+    <title>pulse — вход</title>
     
     <!-- Supabase -->
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <link rel="icon" href="assets/logo.png" type="image/png">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         
         body {
@@ -24,7 +26,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 10px 20px;
         }
         
         .container {
@@ -37,13 +39,21 @@
         }
         
         .logo {
-            font-size: 32px;
+            font-size: 40px;
             font-weight: 800;
             color: #3b82f6;
             text-decoration: none;
-            display: block;
-            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
             margin-bottom: 30px;
+        }
+
+        .logo img {
+            width: 36px;
+            height: 36px;
+            object-fit: cover;
         }
         
         .page-title {
@@ -209,7 +219,9 @@
 </head>
 <body>
     <div class="container">
-        <a href="index.html" class="logo">MEETUP</a>
+        <a href="index.html" class="logo">
+            pulse
+        </a>
         <h1 class="page-title">Вход в аккаунт</h1>
         
         <!-- Сообщение об успешной регистрации -->

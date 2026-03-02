@@ -7,7 +7,7 @@ let pendingOpenChatId = null;
 let TOPICS = null;
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
-const UNREAD_KEY = 'meetup_chat_last_read';
+const UNREAD_KEY = 'pulse_chat_last_read';
 const CHAT_BUCKET = 'chat-media';
 let listChannel = null;
 let typingChannel = null;
@@ -197,19 +197,19 @@ function renderChatList() {
     const item = document.createElement('div');
     item.className = 'chat-item';
     item.dataset.chatId = chat.id;
-  const title = chat.meeting_id ? chat.title : (chat.display_title || chat.title);
-  const isUnread = isChatUnread(chat);
-  const unreadCount = chat.unread_count || 0;
-  const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
-  item.innerHTML = `
+    const title = chat.meeting_id ? chat.title : (chat.display_title || chat.title);
+    const isUnread = isChatUnread(chat);
+    const unreadCount = chat.unread_count || 0;
+    const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
+    item.innerHTML = `
     <div class="chat-item-row">
       <div class="chat-item-title">${title}</div>
       ${isUnread ? `<div class="chat-unread">${unreadLabel}</div>` : ''}
     </div>
     <div class="chat-item-sub">${chat.meeting_id ? 'Чат встречи' : 'Личный чат'}</div>
   `;
-  item.onclick = () => openChat(chat);
-  list.appendChild(item);
+    item.onclick = () => openChat(chat);
+    list.appendChild(item);
   });
 }
 

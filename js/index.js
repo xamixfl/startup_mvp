@@ -581,7 +581,7 @@ function showNotification(message, type = 'success') {
 }
 
 function getLocalMeetings() {
-  const raw = localStorage.getItem('meetup_meetings');
+  const raw = localStorage.getItem('pulse_meetings');
   if (!raw) return [];
   try {
     const list = JSON.parse(raw);

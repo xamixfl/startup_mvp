@@ -1,6 +1,6 @@
 {
-  "name": "Meetup",
-  "short_name": "Meetup",
+  "name": "pulse",
+  "short_name": "pulse",
   "start_url": "/index.html",
   "display": "standalone",
   "background_color": "#f8fafc",

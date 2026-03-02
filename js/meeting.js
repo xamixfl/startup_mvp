@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function getMeetingFromStorage(meetingId) {
-  const raw = localStorage.getItem('meetup_meetings');
+  const raw = localStorage.getItem('pulse_meetings');
   if (!raw) return null;
   try {
     const list = JSON.parse(raw);

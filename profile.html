@@ -4,21 +4,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meetup — Профиль</title>
+    <title>pulse — профиль</title>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <link rel="icon" href="assets/logo.png" type="image/png">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
         body {
             background: #f8fafc;
             color: #1e293b;
             min-height: 100vh;
-            padding: 30px 20px;
+            padding: 10px 20px;
         }
 
         .page {
@@ -30,14 +32,23 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 24px;
+            margin-bottom: 16px;
         }
 
         .logo {
-            font-size: 28px;
+            font-size: 36px;
             font-weight: 800;
             color: #3b82f6;
             text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo img {
+            width: 32px;
+            height: 32px;
+            object-fit: cover;
         }
 
         .back-link {
@@ -552,7 +563,9 @@
 <body>
     <div class="page">
         <div class="header">
-            <a href="index.html" class="logo">MEETUP</a>
+            <a href="index.html" class="logo">
+                pulse
+            </a>
             <a href="index.html" class="back-link">← К ленте</a>
         </div>
 

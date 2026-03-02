@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 const DEFAULT_AVATAR = 'assets/avatar.png';
 
 function getLocalMeetings() {
-  const raw = localStorage.getItem('meetup_meetings');
+  const raw = localStorage.getItem('pulse_meetings');
   if (!raw) return [];
   try {
     const list = JSON.parse(raw);
@@ -497,7 +497,7 @@ window.shareMeeting = async function (meetingId) {
     // Try native share API
     if (navigator.share) {
       await navigator.share({
-        title: 'MEETUP - Встреча',
+        title: 'pulse - встреча',
         text: 'Приглашаю вас к встрече!',
         url: meetingUrl
       });
