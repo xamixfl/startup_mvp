@@ -10,9 +10,14 @@ const DEFAULT_AVATAR = 'assets/avatar.png';
 const UNREAD_KEY = 'pulse_chat_last_read';
 const CHAT_BUCKET = 'chat-media';
 let listChannel = null;
+let messageChannels = [];
 let typingChannel = null;
 let typingTimeoutId = null;
 let typingHideTimeoutId = null;
+let messagePollTimer = null;
+let chatListPollTimer = null;
+let currentChatMessageSignature = 'empty';
+let isChatListPolling = false;
 let pendingImageFile = null;
 const MAX_IMAGE_MB = 5;
 
@@ -34,6 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupTypingIndicator();
   setupImageModal();
   setupTitleToggle();
+  startChatListPolling();
 });
 
 async function loadChats() {
@@ -195,7 +201,7 @@ function renderChatList() {
 
   chats.forEach(chat => {
     const item = document.createElement('div');
-    item.className = 'chat-item';
+    item.className = `chat-item${currentChat && currentChat.id === chat.id ? ' active' : ''}`;
     item.dataset.chatId = chat.id;
     const title = chat.meeting_id ? chat.title : (chat.display_title || chat.title);
     const isUnread = isChatUnread(chat);
@@ -240,7 +246,9 @@ async function openChat(chat) {
     titleEl.textContent = chat.display_title;
   }
   setupChatTypingChannel(chat.id);
-  await loadMessages(chat.id);
+  const messageMeta = await loadMessages(chat.id);
+  currentChatMessageSignature = messageMeta?.signature || 'empty';
+  startMessagePolling(chat.id);
   markChatRead(chat);
   renderChatList();
   await loadChatInfo(chat);
@@ -321,7 +329,7 @@ async function loadMessages(chatId) {
       console.error('Ошибка загрузки сообщений:', error);
     }
     body.innerHTML = '<div class="chat-empty">Сообщений пока нет</div>';
-    return;
+    return { signature: 'empty', lastMessageAt: null };
   }
 
   const userIds = Array.from(new Set(messages.map(m => m.user_id)));
@@ -366,6 +374,11 @@ async function loadMessages(chatId) {
       });
     });
   }
+  const lastMessage = messages[messages.length - 1];
+  return {
+    signature: `${lastMessage.id}:${lastMessage.created_at}`,
+    lastMessageAt: lastMessage.created_at
+  };
 }
 
 async function applyLastMessageMeta(chatIds) {
@@ -458,23 +471,25 @@ async function applyUnreadCounts(chatIds) {
 }
 
 function setupRealtimeSubscriptions(chatIds) {
-  if (!supabaseClient || !chatIds || chatIds.length === 0) return;
+  if (!supabaseClient) return;
   if (listChannel) {
     supabaseClient.removeChannel(listChannel);
     listChannel = null;
   }
-
-  const filterIds = chatIds.join(',');
+  if (messageChannels.length > 0) {
+    messageChannels.forEach(channel => supabaseClient.removeChannel(channel));
+    messageChannels = [];
+  }
   listChannel = supabaseClient
     .channel('chat-list-updates')
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: TABLES.chat_messages, filter: `chat_id=in.(${filterIds})` },
-      payload => handleMessageRealtime(payload)
+      { event: 'INSERT', schema: 'public', table: TABLES.chat_members, filter: `user_id=eq.${currentUser.id}` },
+      () => loadChats()
     )
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: TABLES.chat_members, filter: `user_id=eq.${currentUser.id}` },
+      { event: 'UPDATE', schema: 'public', table: TABLES.chat_members, filter: `user_id=eq.${currentUser.id}` },
       () => loadChats()
     )
     .on(
@@ -483,6 +498,31 @@ function setupRealtimeSubscriptions(chatIds) {
       () => loadChats()
     )
     .subscribe();
+
+  if (!chatIds || chatIds.length === 0) return;
+
+  // Use per-chat subscriptions to avoid unreliable `in.(...)` filters with UUID ids.
+  chatIds.forEach(chatId => {
+    const channel = supabaseClient
+      .channel(`chat-messages:${chatId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: TABLES.chat_messages, filter: `chat_id=eq.${chatId}` },
+        payload => handleMessageRealtime(payload)
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: TABLES.chat_messages, filter: `chat_id=eq.${chatId}` },
+        () => handleMessageStructureChange(chatId)
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: TABLES.chat_messages, filter: `chat_id=eq.${chatId}` },
+        () => handleMessageStructureChange(chatId)
+      )
+      .subscribe();
+    messageChannels.push(channel);
+  });
 }
 
 function handleMessageRealtime(payload) {
@@ -500,9 +540,84 @@ function handleMessageRealtime(payload) {
   sortChatsByLastActivity();
   if (currentChat && currentChat.id === msg.chat_id) {
     loadMessages(currentChat.id);
+    currentChatMessageSignature = `${msg.id}:${msg.created_at}`;
     markChatRead(currentChat);
   }
   renderChatList();
+}
+
+async function handleMessageStructureChange(chatId) {
+  const chat = chats.find(c => c.id === chatId);
+  if (!chat) return;
+  await applyLastMessageMeta([chatId]);
+  if (currentChat && currentChat.id === chatId) {
+    const messageMeta = await loadMessages(chatId);
+    currentChatMessageSignature = messageMeta?.signature || 'empty';
+    markChatRead(chat);
+  } else {
+    chat.unread_count = (chat.unread_count || 0) + 1;
+  }
+  sortChatsByLastActivity();
+  renderChatList();
+}
+
+function startMessagePolling(chatId) {
+  stopMessagePolling();
+  if (!chatId) return;
+  messagePollTimer = setInterval(() => {
+    pollCurrentChatMessages(chatId);
+  }, 2500);
+}
+
+function stopMessagePolling() {
+  if (!messagePollTimer) return;
+  clearInterval(messagePollTimer);
+  messagePollTimer = null;
+}
+
+async function pollCurrentChatMessages(chatId) {
+  if (!currentChat || currentChat.id !== chatId || document.hidden) return;
+  const { data: latest, error } = await supabaseClient
+    .from(TABLES.chat_messages)
+    .select('id, created_at')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return;
+  const latestSignature = latest ? `${latest.id}:${latest.created_at}` : 'empty';
+  if (latestSignature === currentChatMessageSignature) return;
+
+  const messageMeta = await loadMessages(chatId);
+  currentChatMessageSignature = messageMeta?.signature || latestSignature;
+
+  const chat = chats.find(c => c.id === chatId);
+  if (!chat) return;
+  chat.last_message_at = messageMeta?.lastMessageAt || latest?.created_at || null;
+  chat.unread_count = 0;
+  sortChatsByLastActivity();
+  renderChatList();
+  markChatRead(chat);
+}
+
+function startChatListPolling() {
+  stopChatListPolling();
+  chatListPollTimer = setInterval(async () => {
+    if (document.hidden || isChatListPolling) return;
+    isChatListPolling = true;
+    try {
+      await loadChats();
+    } finally {
+      isChatListPolling = false;
+    }
+  }, 15000);
+}
+
+function stopChatListPolling() {
+  if (!chatListPollTimer) return;
+  clearInterval(chatListPollTimer);
+  chatListPollTimer = null;
 }
 
 async function leaveChatFromList(chatId) {
@@ -548,6 +663,8 @@ async function deletePersonalChat(chatId) {
 function removeChatFromList(chatId) {
   chats = chats.filter(chat => chat.id !== chatId);
   if (currentChat?.id === chatId) {
+    stopMessagePolling();
+    currentChatMessageSignature = 'empty';
     currentChat = null;
     const titleEl = document.getElementById('chat-title');
     const body = document.getElementById('chat-body');
@@ -635,7 +752,8 @@ function setupSendMessage() {
       return;
     }
     input.value = '';
-    await loadMessages(currentChat.id);
+    const messageMeta = await loadMessages(currentChat.id);
+    currentChatMessageSignature = messageMeta?.signature || currentChatMessageSignature;
   };
 
   input.addEventListener('keydown', async (event) => {
@@ -733,7 +851,8 @@ async function uploadAndSendImage(file) {
     return;
   }
 
-  await loadMessages(currentChat.id);
+  const messageMeta = await loadMessages(currentChat.id);
+  currentChatMessageSignature = messageMeta?.signature || currentChatMessageSignature;
 }
 
 function setupImageModal() {
@@ -991,3 +1110,8 @@ function getTopicName(topicId) {
   };
   return fallback[topicId] || topicId;
 }
+
+window.addEventListener('beforeunload', () => {
+  stopMessagePolling();
+  stopChatListPolling();
+});
