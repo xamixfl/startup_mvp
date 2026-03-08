@@ -25,6 +25,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
 });
 
+function isValidEmojiIcon(value) {
+  if (typeof value !== 'string') return false;
+  const v = value.trim();
+  if (!v) return false;
+  return /^[\p{Extended_Pictographic}\uFE0F\u200D]+$/u.test(v);
+}
+
+function resolveCategoryLabel(category) {
+  let displayName = (category?.name || '').trim();
+  let icon = '';
+
+  const explicitIcon = (category?.icon || '').trim();
+  if (isValidEmojiIcon(explicitIcon)) {
+    icon = explicitIcon;
+  }
+
+  if (!icon && displayName) {
+    const emojiMatch = displayName.match(/^([\p{Extended_Pictographic}\uFE0F\u200D]+)\s+/u);
+    if (emojiMatch && isValidEmojiIcon(emojiMatch[1])) {
+      icon = emojiMatch[1];
+      displayName = displayName.slice(emojiMatch[0].length).trim();
+    }
+  }
+
+  return { icon, displayName };
+}
+
 function initCategories() {
   const container = document.getElementById('categories-container');
   if (!container) return;
@@ -33,21 +60,13 @@ function initCategories() {
     const checkboxId = `category-${category.id}`;
     const wrapper = document.createElement('div');
     
-    // Extract icon from name if not separate (e.g., "🎲 Настольные игры" -> icon: "🎲", name: "Настольные игры")
-    let icon = category.icon || '';
-    let displayName = category.name;
-    if (!icon && category.name) {
-      const emojiMatch = category.name.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}])\s*/u);
-      if (emojiMatch) {
-        icon = emojiMatch[0].trim();
-        displayName = category.name.substring(emojiMatch[0].length).trim();
-      }
-    }
+    const { icon, displayName } = resolveCategoryLabel(category);
+    const iconHtml = icon ? `<span class="category-icon">${icon}</span>` : '';
     
     wrapper.innerHTML = `
       <input type="checkbox" id="${checkboxId}" class="category-checkbox" value="${category.id}">
       <label for="${checkboxId}" class="category-label">
-        <span class="category-icon">${icon}</span>
+        ${iconHtml}
         <span>${displayName}</span>
       </label>
     `;

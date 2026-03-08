@@ -2,7 +2,7 @@ const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
 let isSubmitting = false;
 let editingMeetingId = null;
-const MAX_LIFETIME_HOURS = 24;
+const MAX_LIFETIME_HOURS = 72;
 const TIME_STEP_MINUTES = 15;
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -148,7 +148,7 @@ function handleCreateMeeting(event) {
     return;
   }
   if (diffMs > MAX_LIFETIME_HOURS * 60 * 60 * 1000) {
-    showNotification('Можно выбрать только в пределах 24 часов');
+    showNotification('Можно выбрать только в пределах 72 часов');
     return;
   }
 
@@ -380,4 +380,6 @@ async function loadMeetingForEdit(meetingId) {
     window.location.href = 'index.html';
   }
 }
+
+
 

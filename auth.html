@@ -240,14 +240,17 @@
         /* Категории */
         .categories-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(2, minmax(0, 210px));
+            justify-content: center;
             gap: 10px;
-            margin-bottom: 20px;
+            width: 100%;
+            max-width: 440px;
+            margin: 0 auto 20px;
         }
         
         @media (max-width: 480px) {
             .categories-grid {
-                grid-template-columns: 1fr;
+                grid-template-columns: minmax(0, 1fr);
             }
         }
         
@@ -276,8 +279,14 @@
         }
         
         .category-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 22px;
             margin-right: 10px;
             font-size: 18px;
+            line-height: 1;
+            font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
         }
         
         /* Ошибки */
