@@ -1,7 +1,8 @@
-// Topics will be fetched from database
+﻿// Topics will be fetched from database
 let TOPICS = [];
 let currentUser = null;
 let viewedProfile = null;
+let isCurrentUserBanned = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
@@ -26,6 +27,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderProfile(profile);
   renderMeetings(profile);
   setupEditButton();
+  setupReportButton();
+  setupBanButton();
 });
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
@@ -861,4 +864,128 @@ async function handleLogout() {
     alert('❌ Ошибка при выходе: ' + error.message);
   }
 }
+
+function setupReportButton() {
+  const reportBtn = document.getElementById('report-btn');
+  const messageBtn = document.getElementById('message-btn');
+  if (!reportBtn) return;
+
+  // Show report button only if viewing someone else's profile
+  if (currentUser && viewedProfile && currentUser.id !== viewedProfile.id) {
+    reportBtn.style.display = 'block';
+    reportBtn.onclick = () => {
+      const displayName = viewedProfile.full_name || viewedProfile.username || 'Пользователь';
+      if (typeof window.openReportModal === 'function') {
+        window.openReportModal('user', viewedProfile.id, displayName);
+      }
+    };
+  } else {
+    reportBtn.style.display = 'none';
+  }
+}
+
+async function setupBanButton() {
+  const banBtn = document.getElementById('ban-btn');
+  if (!banBtn) return;
+
+  if (!currentUser || !viewedProfile || currentUser.id === viewedProfile.id) {
+    banBtn.style.display = 'none';
+    return;
+  }
+
+  banBtn.style.display = 'block';
+
+  let isBlocked = await checkIfUserIsBlocked(viewedProfile.id);
+  updateBanButton(banBtn, isBlocked);
+
+  banBtn.onclick = async () => {
+    if (isBlocked) {
+      await unbanUser(viewedProfile.id);
+    } else {
+      await banUser(viewedProfile.id);
+    }
+    isBlocked = await checkIfUserIsBlocked(viewedProfile.id);
+    updateBanButton(banBtn, isBlocked);
+  };
+}
+
+function updateBanButton(btn, isBlocked) {
+  if (isBlocked) {
+    btn.textContent = 'Разблокировать';
+    btn.classList.add('blocked');
+  } else {
+    btn.textContent = 'Заблокировать';
+    btn.classList.remove('blocked');
+  }
+}
+
+async function getCurrentUserBlockedList() {
+  if (!currentUser) return [];
+
+  try {
+    const { data, error } = await window.APP.supabase
+      .from(window.APP.TABLES.profiles)
+      .select('blocked_users')
+      .eq('id', currentUser.id)
+      .single();
+
+    if (error) {
+      console.error('Error loading blocked list:', error);
+      return [];
+    }
+
+    return Array.isArray(data?.blocked_users) ? data.blocked_users : [];
+  } catch (error) {
+    console.error('Error loading blocked list:', error);
+    return [];
+  }
+}
+
+async function checkIfUserIsBlocked(blockedUserId) {
+  const blockedList = await getCurrentUserBlockedList();
+  return blockedList.includes(blockedUserId);
+}
+
+async function banUser(blockedUserId) {
+  if (!currentUser) return;
+
+  const blockedList = await getCurrentUserBlockedList();
+  if (blockedList.includes(blockedUserId)) return;
+
+  const nextList = [...blockedList, blockedUserId];
+  const { error } = await window.APP.supabase
+    .from(window.APP.TABLES.profiles)
+    .update({ blocked_users: nextList })
+    .eq('id', currentUser.id);
+
+  if (error) {
+    console.error('Error blocking user:', error);
+    alert('Failed to block user');
+    return;
+  }
+
+  alert('User blocked');
+}
+
+async function unbanUser(blockedUserId) {
+  if (!currentUser) return;
+
+  const blockedList = await getCurrentUserBlockedList();
+  const nextList = blockedList.filter((id) => id !== blockedUserId);
+
+  const { error } = await window.APP.supabase
+    .from(window.APP.TABLES.profiles)
+    .update({ blocked_users: nextList })
+    .eq('id', currentUser.id);
+
+  if (error) {
+    console.error('Error unblocking user:', error);
+    alert('Failed to unblock user');
+    return;
+  }
+
+  alert('User unblocked');
+}
+
+
 

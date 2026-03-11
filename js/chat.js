@@ -1,16 +1,19 @@
-const supabaseClient = window.APP?.supabase;
-const { TABLES } = window.APP || {};
+﻿const { TABLES } = window.APP || {};
+const chatSupabase = window.supabaseClient || window.APP?.supabase;
 let currentUser = null;
+let currentProfile = null;
 let chats = [];
 let currentChat = null;
 let pendingOpenChatId = null;
 let TOPICS = null;
+let isCurrentUserAdmin = false;
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
 const UNREAD_KEY = 'pulse_chat_last_read';
 const CHAT_BUCKET = 'chat-media';
 let listChannel = null;
 let messageChannels = [];
+let reportsChannel = null;
 let typingChannel = null;
 let typingTimeoutId = null;
 let typingHideTimeoutId = null;
@@ -20,14 +23,31 @@ let currentChatMessageSignature = 'empty';
 let isChatListPolling = false;
 let pendingImageFile = null;
 const MAX_IMAGE_MB = 5;
+let hasInitialDirectCleanup = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { data: { user } } = await chatSupabase.auth.getUser();
   if (!user) {
     window.location.href = 'login.html';
     return;
   }
   currentUser = user;
+  
+  // Check if user is banned
+  const { isBanned } = await checkCurrentUserBanStatus(user.id);
+  if (isBanned) {
+    const body = document.getElementById('chat-body');
+    if (body) {
+      body.innerHTML = '<div class="chat-empty"><strong>Ваш аккаунт заблокирован.</strong><br>Вы не можете общаться с другими пользователями.</div>';
+    }
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send');
+    if (input) input.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+    return;
+  }
+  
+  isCurrentUserAdmin = await checkCurrentUserAdminRole(user.id);
   if (typeof window.fetchTopics === 'function') {
     TOPICS = await window.fetchTopics();
   }
@@ -39,7 +59,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupTypingIndicator();
   setupImageModal();
   setupTitleToggle();
-  startChatListPolling();
+  setupReportButton();
+  // Realtime subscriptions handle updates; polling is kept only as optional fallback.
+  // startChatListPolling();
 });
 
 async function loadChats() {
@@ -51,36 +73,36 @@ async function loadChats() {
 
   try {
     console.log('Step 1: Fetching chat_members for user:', currentUser.id);
-    const { data: memberships, error } = await supabaseClient
+    const { data: memberships, error } = await chatSupabase
       .from(TABLES.chat_members)
       .select('chat_id, status')
       .eq('user_id', currentUser.id)
       .eq('status', 'approved');
 
     if (error) {
-      console.error('❌ Step 1 FAILED - Ошибка загрузки chat_members:', error);
+      console.error('Step 1 FAILED - chat_members load error:', error);
       console.error('   Error code:', error.code);
       console.error('   Error message:', error.message);
-      list.innerHTML = '<div class="chat-item">❌ Ошибка: ' + error.message + '</div>';
+      list.innerHTML = '<div class="chat-item">Error: ' + error.message + '</div>';
       return;
     }
 
     const memberChatIds = (memberships || []).map(m => m.chat_id);
-    console.log('✅ Step 1 OK - Found member chats:', memberChatIds);
+    console.log('Step 1 OK - Found member chats:', memberChatIds);
 
     console.log('Step 2: Fetching owned chats');
-    const { data: ownedChats, error: ownedError } = await supabaseClient
+    const { data: ownedChats, error: ownedError } = await chatSupabase
       .from(TABLES.chats)
       .select('id, title, meeting_id, owner_id, created_at')
       .eq('owner_id', currentUser.id)
       .order('created_at', { ascending: false });
 
     if (ownedError) {
-      console.error('❌ Step 2 FAILED - Ошибка загрузки chats:', ownedError);
+      console.error('Step 2 FAILED - chats load error:', ownedError);
       console.error('   Error code:', ownedError.code);
       console.error('   Error message:', ownedError.message);
     } else {
-      console.log('✅ Step 2 OK - Found owned chats:', (ownedChats || []).map(c => c.id));
+      console.log('Step 2 OK - Found owned chats:', (ownedChats || []).map(c => c.id));
     }
 
     const ownedIds = (ownedChats || []).map(c => c.id);
@@ -88,7 +110,7 @@ async function loadChats() {
 
     if (missingOwner.length > 0) {
       console.log('Step 3: Adding owner to missing chat_members records');
-      const { error: insertOwnerError } = await supabaseClient
+      const { error: insertOwnerError } = await chatSupabase
         .from(TABLES.chat_members)
         .insert(missingOwner.map(chatId => ({
           chat_id: chatId,
@@ -97,89 +119,102 @@ async function loadChats() {
           status: 'approved'
         })));
       if (insertOwnerError) {
-        console.error('❌ Step 3 FAILED - Ошибка добавления владельца:', insertOwnerError);
+        console.error('Step 3 FAILED - owner insert error:', insertOwnerError);
       } else {
-        console.log('✅ Step 3 OK - Owner added to', missingOwner.length, 'chats');
+        console.log('Step 3 OK - Owner added to', missingOwner.length, 'chats');
       }
     }
 
-    console.log('Step 4: Refreshing chat_members list');
-    const { data: refreshed, error: refreshedError } = await supabaseClient
-      .from(TABLES.chat_members)
-      .select('chat_id, status')
-      .eq('user_id', currentUser.id)
-      .eq('status', 'approved');
+    if (missingOwner.length > 0) {
+      console.log('Step 4: Refreshing chat_members list');
+      const { data: refreshed, error: refreshedError } = await chatSupabase
+        .from(TABLES.chat_members)
+        .select('chat_id, status')
+        .eq('user_id', currentUser.id)
+        .eq('status', 'approved');
 
-    if (refreshedError) {
-      console.error('❌ Step 4 FAILED:', refreshedError);
+      if (refreshedError) {
+        console.error('Step 4 FAILED:', refreshedError);
+      } else {
+        console.log('Step 4 OK - Refreshed member chats:', (refreshed || []).map(m => m.chat_id));
+      }
+
+      refreshedIds = (refreshed || []).map(m => m.chat_id);
     } else {
-      console.log('✅ Step 4 OK - Refreshed member chats:', (refreshed || []).map(m => m.chat_id));
+      refreshedIds = memberChatIds;
     }
-
-    refreshedIds = (refreshed || []).map(m => m.chat_id);
     mergedIds = Array.from(new Set([...refreshedIds, ...ownedIds]));
     console.log('Merged chat IDs:', mergedIds);
 
     if (mergedIds.length === 0) {
-      list.innerHTML = '<div class="chat-item">Нет чатов</div>';
+      list.innerHTML = '<div class="chat-item">No chats yet</div>';
       return;
     }
 
     console.log('Step 5: Fetching chat details for IDs:', mergedIds);
-    const { data: chatsData, error: chatsError } = await supabaseClient
+    const { data: chatsData, error: chatsError } = await chatSupabase
       .from(TABLES.chats)
       .select('id, title, meeting_id, owner_id, created_at, peer_id')
       .in('id', mergedIds)
       .order('created_at', { ascending: false });
 
     if (chatsError) {
-      console.error('❌ Step 5 FAILED - Ошибка выборки чатов:', chatsError);
-      console.error('   Error code:', chatsError.code);
-      console.error('   Error message:', chatsError.message);
-      list.innerHTML = '<div class="chat-item">❌ Ошибка: ' + chatsError.message + '</div>';
+      console.error('Step 5 FAILED - chat fetch error:', chatsError);
+      console.error('Error code:', chatsError.code);
+      console.error('Error message:', chatsError.message);
+      list.innerHTML = '<div class="chat-item">Error: ' + chatsError.message + '</div>';
       return;
     }
 
-    console.log('✅ Step 5 OK - Found', chatsData.length, 'chats');
-    chats = chatsData || [];
+    console.log('Step 5 OK - Found', chatsData.length, 'chats');
+    chats = (chatsData || []).map(chat => ({ ...chat, is_admin_chat: false }));
+
+    if (isCurrentUserAdmin) {
+      await ensurePinnedReportsChat();
+    } else {
+      chats = chats.filter(chat => !isReportsChat(chat));
+    }
   } catch (err) {
-    console.error('❌ UNEXPECTED ERROR:', err);
+    console.error('Unexpected error:', err);
     const list = document.getElementById('chat-list');
     if (list) {
-      list.innerHTML = '<div class="chat-item">❌ Неожиданная ошибка: ' + err.message + '</div>';
+      list.innerHTML = '<div class="chat-item">Unexpected error: ' + err.message + '</div>';
     }
     return;
   }
 
   if (mergedIds.length > 0 && chats.length === 0) {
-    list.innerHTML = '<div class="chat-item">Нет доступа к чатам (RLS)</div>';
+    list.innerHTML = '<div class="chat-item">No access to chats (RLS)</div>';
     return;
   }
 
   try {
     console.log('Step 6: Processing chat metadata');
     await applyLastMessageMeta(mergedIds);
-    console.log('✅ Step 6 OK');
+    console.log('Step 6 OK');
 
     console.log('Step 7: Enriching direct chat titles');
     await enrichDirectChatTitles();
-    console.log('✅ Step 7 OK');
+    console.log('Step 7 OK');
 
-    console.log('Step 8: Cleaning up empty direct chats');
-    await cleanupEmptyDirectChats(new Set(refreshedIds), currentChat?.id);
-    console.log('✅ Step 8 OK');
+    if (!hasInitialDirectCleanup) {
+      console.log('Step 8: Cleaning up empty direct chats');
+      await cleanupEmptyDirectChats(new Set(refreshedIds), currentChat?.id);
+      hasInitialDirectCleanup = true;
+      console.log('Step 8 OK');
+    }
 
     console.log('Step 8.1: Calculating unread counts');
     await applyUnreadCounts(mergedIds);
-    console.log('✅ Step 8.1 OK');
+    console.log('Step 8.1 OK');
 
     console.log('Step 9: Sorting chats');
     sortChatsByLastActivity();
-    console.log('✅ Step 9 OK');
+    console.log('Step 9 OK');
 
     console.log('Step 10: Rendering chat list');
     renderChatList();
-    console.log('✅ Step 10 OK - Rendered', chats.length, 'chats');
+    console.log('Step 10 OK - Rendered', chats.length, 'chats');
 
     setupRealtimeSubscriptions(mergedIds);
 
@@ -189,8 +224,87 @@ async function loadChats() {
       pendingOpenChatId = null;
     }
   } catch (err) {
-    console.error('❌ Error in chat processing steps:', err);
-    list.innerHTML = '<div class="chat-item">❌ Ошибка обработки чатов: ' + err.message + '</div>';
+    console.error('Error in chat processing steps:', err);
+    list.innerHTML = '<div class="chat-item">Chat processing error: ' + err.message + '</div>';
+  }
+}
+
+async function checkCurrentUserAdminRole(userId) {
+  try {
+    const { data, error } = await chatSupabase
+      .from(TABLES.profiles)
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) return false;
+    return data?.role === 'admin';
+  } catch (e) {
+    return false;
+  }
+}
+
+async function checkCurrentUserBanStatus(userId) {
+  try {
+    const { data, error } = await chatSupabase
+      .from(TABLES.profiles)
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) return { isBanned: false };
+    return { isBanned: data?.role === 'banned' };
+  } catch (e) {
+    return { isBanned: false };
+  }
+}
+
+async function checkIfBlockedByUser(otherUserId) {
+  try {
+    const { data, error } = await chatSupabase
+      .from(TABLES.profiles)
+      .select('blocked_users')
+      .eq('id', otherUserId)
+      .single();
+    if (error) return false;
+    const blockedUsers = Array.isArray(data?.blocked_users) ? data.blocked_users : [];
+    return blockedUsers.includes(currentUser.id);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function ensurePinnedReportsChat() {
+  const normalize = (value) => String(value || '').toLowerCase();
+  const existing = chats.find(chat => {
+    if (chat.meeting_id) return false;
+    const title = normalize(chat.title);
+    return title.includes('report') || title.includes('moderation') || title.includes('модера');
+  });
+
+  if (existing) {
+    existing.is_admin_chat = true;
+    return;
+  }
+
+  try {
+    const { data: created, error } = await chatSupabase
+      .from(TABLES.chats)
+      .insert([{
+        title: 'Reports',
+        meeting_id: null,
+        owner_id: currentUser.id
+      }])
+      .select('id, title, meeting_id, owner_id, created_at, peer_id')
+      .single();
+
+    if (error || !created) return;
+
+    await chatSupabase
+      .from(TABLES.chat_members)
+      .insert([{ chat_id: created.id, user_id: currentUser.id, role: 'owner', status: 'approved' }]);
+
+    chats.push({ ...created, is_admin_chat: true });
+  } catch (e) {
+    // Ignore creation errors and continue rendering existing chats.
   }
 }
 
@@ -199,7 +313,32 @@ function renderChatList() {
   if (!list) return;
   list.innerHTML = '';
 
-  chats.forEach(chat => {
+  // Separate admin chats from regular chats
+  const adminChats = chats.filter(chat => chat.is_admin_chat);
+  const regularChats = chats.filter(chat => !chat.is_admin_chat);
+
+  // Render admin chats first (pinned at top)
+  adminChats.forEach(chat => {
+    const item = document.createElement('div');
+    item.className = `chat-item chat-item-admin${currentChat && currentChat.id === chat.id ? ' active' : ''}`;
+    item.dataset.chatId = chat.id;
+    const isUnread = isChatUnread(chat);
+    const unreadCount = chat.unread_count || 0;
+    const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
+    const preview = getChatListPreview(chat);
+    item.innerHTML = `
+    <div class="chat-item-row">
+      <div class="chat-item-title">[Pinned] ${chat.title}</div>
+      ${isUnread ? `<div class="chat-unread">${unreadLabel}</div>` : ''}
+    </div>
+    <div class="chat-item-sub" style="color: #92400e;">${escapeHtml(preview)}</div>
+  `;
+    item.onclick = () => openChat(chat);
+    list.appendChild(item);
+  });
+
+  // Render regular chats
+  regularChats.forEach(chat => {
     const item = document.createElement('div');
     item.className = `chat-item${currentChat && currentChat.id === chat.id ? ' active' : ''}`;
     item.dataset.chatId = chat.id;
@@ -207,16 +346,50 @@ function renderChatList() {
     const isUnread = isChatUnread(chat);
     const unreadCount = chat.unread_count || 0;
     const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
+    const preview = getChatListPreview(chat);
     item.innerHTML = `
     <div class="chat-item-row">
       <div class="chat-item-title">${title}</div>
       ${isUnread ? `<div class="chat-unread">${unreadLabel}</div>` : ''}
     </div>
-    <div class="chat-item-sub">${chat.meeting_id ? 'Чат встречи' : 'Личный чат'}</div>
+    <div class="chat-item-sub">${escapeHtml(preview)}</div>
   `;
     item.onclick = () => openChat(chat);
     list.appendChild(item);
   });
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function shortenPreviewText(value, maxLength = 52) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function normalizeMessagePreview(content, userId) {
+  const isMine = !!currentUser?.id && userId === currentUser.id;
+  const prefix = isMine ? 'You: ' : '';
+  if (typeof content !== 'string' || !content.trim()) {
+    return 'No messages yet';
+  }
+  if (content.startsWith('image:')) {
+    return `${prefix}Photo`;
+  }
+  return `${prefix}${shortenPreviewText(content)}`;
+}
+
+function getChatListPreview(chat) {
+  if (!chat) return 'No messages yet';
+  if (chat.last_message_preview) return chat.last_message_preview;
+  return chat.meeting_id ? 'Meeting chat' : 'Direct chat';
 }
 
 function setupChatSelectionFromUrl() {
@@ -232,34 +405,145 @@ async function openChat(chat) {
     el.classList.toggle('active', el.dataset.chatId === chat.id);
   });
 
+  // Show report button
+  const reportBtn = document.getElementById('chat-report-btn');
+  if (reportBtn) {
+    reportBtn.style.display = 'block';
+  }
+
   const titleEl = document.getElementById('chat-title');
   titleEl.textContent = chat.meeting_id ? chat.title : (chat.display_title || chat.title);
 
   const input = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
-  input.disabled = false;
-  sendBtn.disabled = false;
-
-  await ensureDirectPeer(chat);
-  await ensureDirectTitle(chat);
-  if (!chat.meeting_id && chat.display_title) {
-    titleEl.textContent = chat.display_title;
+  const isReports = isReportsChat(chat);
+  
+  // For direct chats, check if the other user has blocked current user
+  let isUserBlocked = false;
+  if (!chat.meeting_id && !isReports) {
+    const peerId = chat._peerId || chat.peer_id || 
+      (chat.owner_id && chat.owner_id !== currentUser.id ? chat.owner_id : null);
+    if (peerId) {
+      isUserBlocked = await checkIfBlockedByUser(peerId);
+    }
   }
-  setupChatTypingChannel(chat.id);
-  const messageMeta = await loadMessages(chat.id);
-  currentChatMessageSignature = messageMeta?.signature || 'empty';
-  startMessagePolling(chat.id);
+  
+  input.disabled = isReports || isUserBlocked;
+  sendBtn.disabled = isReports || isUserBlocked;
+
+  if (!isReports) {
+    await ensureDirectPeer(chat);
+    await ensureDirectTitle(chat);
+    if (!chat.meeting_id && chat.display_title) {
+      titleEl.textContent = chat.display_title;
+    }
+  }
+
+  if (isReports) {
+    const messageMeta = await loadReportsFeed();
+    currentChatMessageSignature = messageMeta?.signature || 'empty';
+    stopMessagePolling();
+    if (typingChannel) {
+      chatSupabase.removeChannel(typingChannel);
+      typingChannel = null;
+    }
+  } else {
+    if (isUserBlocked) {
+      const body = document.getElementById('chat-body');
+      if (body) {
+        body.innerHTML = '<div class="chat-empty" style="color: #ef4444;"><strong>Этот пользователь вас заблокировал.</strong></div>';
+      }
+      currentChatMessageSignature = 'blocked';
+      stopMessagePolling();
+    } else {
+      setupChatTypingChannel(chat.id);
+      const messageMeta = await loadMessages(chat.id);
+      currentChatMessageSignature = messageMeta?.signature || 'empty';
+      startMessagePolling(chat.id);
+    }
+  }
+
   markChatRead(chat);
+  chat.unread_count = 0;
   renderChatList();
   await loadChatInfo(chat);
 }
 
+function isReportsChat(chat) {
+  if (!chat) return false;
+  const title = String(chat.title || '').toLowerCase();
+  return title.includes('report') || title.includes('жалоб') || title.includes('moderation') || title.includes('модера');
+}
+
+async function loadReportsFeed() {
+  const body = document.getElementById('chat-body');
+  if (!body) return { signature: 'empty', lastMessageAt: null };
+  body.innerHTML = '';
+
+  const { data: reports, error } = await chatSupabase
+    .from(TABLES.reports)
+    .select('id, report_type, reported_item_id, reported_by_user_id, reason, description, status, created_at')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    body.innerHTML = `<div class="chat-empty">Ошибка загрузки жалоб: ${error.message}</div>`;
+    return { signature: 'empty', lastMessageAt: null };
+  }
+
+  if (!reports || reports.length === 0) {
+    body.innerHTML = '<div class="chat-empty">Жалоб пока нет</div>';
+    return { signature: 'empty', lastMessageAt: null };
+  }
+
+  const reporterIds = Array.from(new Set(reports.map(r => r.reported_by_user_id).filter(Boolean)));
+  let byId = new Map();
+  if (reporterIds.length > 0) {
+    const { data: profiles } = await chatSupabase
+      .from(TABLES.profiles)
+      .select('id, full_name, username')
+      .in('id', reporterIds);
+    byId = new Map((profiles || []).map(p => [p.id, p]));
+  }
+
+  reports.forEach(report => {
+    const profile = byId.get(report.reported_by_user_id);
+    const reporter = profile?.full_name || profile?.username || report.reported_by_user_id || 'Unknown';
+    const bubble = document.createElement('div');
+    bubble.className = 'message';
+    const description = report.description ? `<div class="message-text" style="margin-top:6px;">${escapeHtml(report.description)}</div>` : '';
+    bubble.innerHTML = `
+      <div class="message-author">Report #${report.id.slice(0, 8)} | ${report.created_at ? new Date(report.created_at).toLocaleString() : ''}</div>
+      <div class="message-text"><b>Type:</b> ${escapeHtml(report.report_type)} | <b>Status:</b> ${escapeHtml(report.status)} | <b>Reason:</b> ${escapeHtml(report.reason || '')}</div>
+      <div class="message-text"><b>Reported item:</b> ${escapeHtml(report.reported_item_id || '')}</div>
+      <div class="message-text"><b>Reporter:</b> ${escapeHtml(reporter)}</div>
+      ${description}
+    `;
+    body.appendChild(bubble);
+  });
+
+  body.scrollTop = body.scrollHeight;
+  const last = reports[reports.length - 1];
+  return {
+    signature: last ? `${last.id}:${last.created_at}:${last.status}` : 'empty',
+    lastMessageAt: last?.created_at || null
+  };
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 async function enrichDirectChatTitles() {
-  const directChats = chats.filter(chat => !chat.meeting_id);
+  const directChats = chats.filter(chat => !chat.meeting_id && !chat.is_admin_chat);
   if (!directChats.length) return;
 
   const directIds = directChats.map(chat => chat.id);
-  const { data: members, error: membersError } = await supabaseClient
+  const { data: members, error: membersError } = await chatSupabase
     .from(TABLES.chat_members)
     .select('chat_id, user_id, status')
     .in('chat_id', directIds)
@@ -295,7 +579,7 @@ async function enrichDirectChatTitles() {
   });
 
   if (peerIds.size === 0) return;
-  const { data: profiles, error: profilesError } = await supabaseClient
+  const { data: profiles, error: profilesError } = await chatSupabase
     .from(TABLES.profiles)
     .select('id, full_name, username')
     .in('id', Array.from(peerIds));
@@ -318,7 +602,7 @@ async function loadMessages(chatId) {
   const body = document.getElementById('chat-body');
   body.innerHTML = '';
 
-  const { data: messages, error } = await supabaseClient
+  const { data: messages, error } = await chatSupabase
     .from(TABLES.chat_messages)
     .select('id, user_id, content, created_at')
     .eq('chat_id', chatId)
@@ -333,7 +617,7 @@ async function loadMessages(chatId) {
   }
 
   const userIds = Array.from(new Set(messages.map(m => m.user_id)));
-  const { data: profiles } = await supabaseClient
+  const { data: profiles } = await chatSupabase
     .from(TABLES.profiles)
     .select('id, full_name, username')
     .in('id', userIds);
@@ -383,9 +667,9 @@ async function loadMessages(chatId) {
 
 async function applyLastMessageMeta(chatIds) {
   if (!chatIds || chatIds.length === 0) return;
-  const { data: messages, error } = await supabaseClient
+  const { data: messages, error } = await chatSupabase
     .from(TABLES.chat_messages)
-    .select('chat_id, created_at')
+    .select('chat_id, user_id, content, created_at')
     .in('chat_id', chatIds)
     .order('created_at', { ascending: false });
   if (error) {
@@ -393,18 +677,26 @@ async function applyLastMessageMeta(chatIds) {
     return;
   }
   const latestByChat = new Map();
+  const latestPreviewByChat = new Map();
   (messages || []).forEach(msg => {
     if (!latestByChat.has(msg.chat_id)) {
       latestByChat.set(msg.chat_id, msg.created_at);
+      latestPreviewByChat.set(msg.chat_id, normalizeMessagePreview(msg.content, msg.user_id));
     }
   });
   chats.forEach(chat => {
     chat.last_message_at = latestByChat.get(chat.id) || null;
+    chat.last_message_preview = latestPreviewByChat.get(chat.id) || '';
   });
 }
 
 function sortChatsByLastActivity() {
   chats.sort((a, b) => {
+    // Admin chats always at the top
+    if (a.is_admin_chat && !b.is_admin_chat) return -1;
+    if (!a.is_admin_chat && b.is_admin_chat) return 1;
+    
+    // Sort by last activity for non-admin chats
     const aTime = Date.parse(a.last_message_at || a.created_at || 0);
     const bTime = Date.parse(b.last_message_at || b.created_at || 0);
     return bTime - aTime;
@@ -437,7 +729,11 @@ function markChatRead(chat) {
 }
 
 function isChatUnread(chat) {
-  if (!chat || !chat.last_message_at) return false;
+  if (!chat) return false;
+  if (typeof chat.unread_count === 'number') {
+    return chat.unread_count > 0;
+  }
+  if (!chat.last_message_at) return false;
   const map = getReadMap();
   const lastRead = map[getChatReadKey(chat.id)];
   if (!lastRead) return true;
@@ -451,10 +747,11 @@ async function applyUnreadCounts(chatIds) {
 
   for (const chatId of chatIds) {
     const lastRead = map[getChatReadKey(chatId)];
-    let query = supabaseClient
+    let query = chatSupabase
       .from(TABLES.chat_messages)
       .select('id', { count: 'exact', head: true })
-      .eq('chat_id', chatId);
+      .eq('chat_id', chatId)
+      .neq('user_id', currentUser.id);
     if (lastRead) {
       query = query.gt('created_at', lastRead);
     }
@@ -471,16 +768,20 @@ async function applyUnreadCounts(chatIds) {
 }
 
 function setupRealtimeSubscriptions(chatIds) {
-  if (!supabaseClient) return;
+  if (!chatSupabase) return;
   if (listChannel) {
-    supabaseClient.removeChannel(listChannel);
+    chatSupabase.removeChannel(listChannel);
     listChannel = null;
   }
   if (messageChannels.length > 0) {
-    messageChannels.forEach(channel => supabaseClient.removeChannel(channel));
+    messageChannels.forEach(channel => chatSupabase.removeChannel(channel));
     messageChannels = [];
   }
-  listChannel = supabaseClient
+  if (reportsChannel) {
+    chatSupabase.removeChannel(reportsChannel);
+    reportsChannel = null;
+  }
+  listChannel = chatSupabase
     .channel('chat-list-updates')
     .on(
       'postgres_changes',
@@ -501,9 +802,30 @@ function setupRealtimeSubscriptions(chatIds) {
 
   if (!chatIds || chatIds.length === 0) return;
 
+  reportsChannel = chatSupabase
+    .channel('reports-feed-updates')
+    .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.reports }, async () => {
+      const reportsChat = chats.find(c => isReportsChat(c));
+      if (!reportsChat) return;
+      reportsChat.last_message_at = new Date().toISOString();
+      if (!currentChat || currentChat.id !== reportsChat.id) {
+        reportsChat.unread_count = (reportsChat.unread_count || 0) + 1;
+        sortChatsByLastActivity();
+        renderChatList();
+        return;
+      }
+      const meta = await loadReportsFeed();
+      currentChatMessageSignature = meta?.signature || currentChatMessageSignature;
+      reportsChat.unread_count = 0;
+      markChatRead(reportsChat);
+      sortChatsByLastActivity();
+      renderChatList();
+    })
+    .subscribe();
+
   // Use per-chat subscriptions to avoid unreliable `in.(...)` filters with UUID ids.
   chatIds.forEach(chatId => {
-    const channel = supabaseClient
+    const channel = chatSupabase
       .channel(`chat-messages:${chatId}`)
       .on(
         'postgres_changes',
@@ -529,10 +851,16 @@ function handleMessageRealtime(payload) {
   const msg = payload?.new;
   if (!msg?.chat_id) return;
   const chat = chats.find(c => c.id === msg.chat_id);
+  if (chat && isReportsChat(chat)) {
+    return;
+  }
   if (chat) {
     chat.last_message_at = msg.created_at || new Date().toISOString();
+    chat.last_message_preview = normalizeMessagePreview(msg.content, msg.user_id);
     if (currentChat && currentChat.id === msg.chat_id) {
       chat.unread_count = 0;
+    } else if (msg.user_id === currentUser?.id) {
+      chat.unread_count = chat.unread_count || 0;
     } else {
       chat.unread_count = (chat.unread_count || 0) + 1;
     }
@@ -550,12 +878,12 @@ async function handleMessageStructureChange(chatId) {
   const chat = chats.find(c => c.id === chatId);
   if (!chat) return;
   await applyLastMessageMeta([chatId]);
+  await applyUnreadCounts([chatId]);
   if (currentChat && currentChat.id === chatId) {
     const messageMeta = await loadMessages(chatId);
     currentChatMessageSignature = messageMeta?.signature || 'empty';
     markChatRead(chat);
-  } else {
-    chat.unread_count = (chat.unread_count || 0) + 1;
+    chat.unread_count = 0;
   }
   sortChatsByLastActivity();
   renderChatList();
@@ -577,7 +905,7 @@ function stopMessagePolling() {
 
 async function pollCurrentChatMessages(chatId) {
   if (!currentChat || currentChat.id !== chatId || document.hidden) return;
-  const { data: latest, error } = await supabaseClient
+  const { data: latest, error } = await chatSupabase
     .from(TABLES.chat_messages)
     .select('id, created_at')
     .eq('chat_id', chatId)
@@ -611,7 +939,7 @@ function startChatListPolling() {
     } finally {
       isChatListPolling = false;
     }
-  }, 15000);
+  }, 30000);
 }
 
 function stopChatListPolling() {
@@ -625,7 +953,7 @@ async function leaveChatFromList(chatId) {
   const confirmLeave = confirm('Покинуть этот чат?');
   if (!confirmLeave) return;
 
-  const { error } = await supabaseClient
+  const { error } = await chatSupabase
     .from(TABLES.chat_members)
     .delete()
     .eq('chat_id', chatId)
@@ -645,7 +973,7 @@ async function deletePersonalChat(chatId) {
   const confirmDelete = confirm('Удалить этот личный чат у себя?');
   if (!confirmDelete) return;
 
-  const { error } = await supabaseClient
+  const { error } = await chatSupabase
     .from(TABLES.chat_members)
     .delete()
     .eq('chat_id', chatId)
@@ -683,25 +1011,27 @@ function removeChatFromList(chatId) {
 async function cleanupEmptyDirectChats(approvedSet, openedChatId) {
   if (!chats.length) return;
   try {
-    const directChats = chats.filter(c => !c.meeting_id);
+    // Only auto-clean classic direct chats with peer_id.
+    // Keep service/system chats (like pinned Reports) intact.
+    const directChats = chats.filter(c => !c.meeting_id && !!c.peer_id && !c.is_admin_chat);
     if (!directChats.length) return;
     const deletedIds = new Set();
     for (const chat of directChats) {
       if (pendingOpenChatId && chat.id === pendingOpenChatId) continue;
       if (openedChatId && chat.id === openedChatId) continue;
       if (!approvedSet || !approvedSet.has(chat.id)) continue;
-      const { count, error: countError } = await supabaseClient
+      const { count, error: countError } = await chatSupabase
         .from(TABLES.chat_messages)
         .select('id', { count: 'exact', head: true })
         .eq('chat_id', chat.id);
       if (countError) continue;
       if (count !== 0) continue;
-      const { error: membersDeleteError } = await supabaseClient
+      const { error: membersDeleteError } = await chatSupabase
         .from(TABLES.chat_members)
         .delete()
         .eq('chat_id', chat.id);
       if (membersDeleteError) continue;
-      const { error: chatDeleteError } = await supabaseClient
+      const { error: chatDeleteError } = await chatSupabase
         .from(TABLES.chats)
         .delete()
         .eq('id', chat.id);
@@ -742,7 +1072,7 @@ function setupSendMessage() {
       if (!text) return;
     }
 
-    const { error } = await supabaseClient
+    const { error } = await chatSupabase
       .from(TABLES.chat_messages)
       .insert([{ chat_id: currentChat.id, user_id: currentUser.id, content: text }]);
 
@@ -788,7 +1118,7 @@ function setupImageUpload() {
     }
     const maxBytes = MAX_IMAGE_MB * 1024 * 1024;
     if (file.size > maxBytes) {
-      alert(`Максимальный размер изображения — ${MAX_IMAGE_MB} МБ`);
+      alert(`Максимальный размер изображения - ${MAX_IMAGE_MB} МБ`);
       fileInput.value = '';
       return;
     }
@@ -817,7 +1147,7 @@ async function uploadAndSendImage(file) {
   const safeExt = ext.replace(/[^a-z0-9]/gi, '');
   const path = `${currentUser.id}/${currentChat.id}/${Date.now()}.${safeExt || 'jpg'}`;
 
-  const { error: uploadError } = await supabaseClient
+  const { error: uploadError } = await chatSupabase
     .storage
     .from(CHAT_BUCKET)
     .upload(path, file, { cacheControl: '3600', upsert: false });
@@ -828,7 +1158,7 @@ async function uploadAndSendImage(file) {
     return;
   }
 
-  const { data: publicData } = supabaseClient
+  const { data: publicData } = chatSupabase
     .storage
     .from(CHAT_BUCKET)
     .getPublicUrl(path);
@@ -841,7 +1171,7 @@ async function uploadAndSendImage(file) {
 
   await ensureDirectPeer(currentChat);
 
-  const { error } = await supabaseClient
+  const { error } = await chatSupabase
     .from(TABLES.chat_messages)
     .insert([{ chat_id: currentChat.id, user_id: currentUser.id, content: `image:${imageUrl}` }]);
 
@@ -900,12 +1230,12 @@ function setupTypingIndicator() {
 function setupChatTypingChannel(chatId) {
   const indicator = document.getElementById('typing-indicator');
   if (typingChannel) {
-    supabaseClient.removeChannel(typingChannel);
+    chatSupabase.removeChannel(typingChannel);
     typingChannel = null;
   }
 
   if (!chatId) return;
-  typingChannel = supabaseClient
+  typingChannel = chatSupabase
     .channel(`typing:${chatId}`)
     .on('broadcast', { event: 'typing' }, payload => {
       if (!indicator) return;
@@ -929,7 +1259,7 @@ async function ensureDirectPeer(chat) {
   if (!chat.peer_id) return;
   if (chat.owner_id !== currentUser.id) return;
 
-  const { data: members } = await supabaseClient
+  const { data: members } = await chatSupabase
     .from(TABLES.chat_members)
     .select('user_id')
     .eq('chat_id', chat.id);
@@ -943,7 +1273,7 @@ async function ensureDirectPeer(chat) {
     inserts.push({ chat_id: chat.id, user_id: chat.peer_id, role: 'member', status: 'approved' });
   }
   if (inserts.length > 0) {
-    await supabaseClient.from(TABLES.chat_members).insert(inserts);
+    await chatSupabase.from(TABLES.chat_members).insert(inserts);
   }
 }
 
@@ -958,7 +1288,7 @@ async function ensureDirectTitle(chat) {
     peerId = chat.peer_id;
   }
   if (!peerId) {
-    const { data: members } = await supabaseClient
+    const { data: members } = await chatSupabase
       .from(TABLES.chat_members)
       .select('user_id, status')
       .eq('chat_id', chat.id)
@@ -968,7 +1298,7 @@ async function ensureDirectTitle(chat) {
   }
   if (!peerId) return;
 
-  const { data: profile } = await supabaseClient
+  const { data: profile } = await chatSupabase
     .from(TABLES.profiles)
     .select('id, full_name, username')
     .eq('id', peerId)
@@ -995,7 +1325,7 @@ async function loadChatInfo(chat) {
   infoContent.innerHTML = '';
 
   if (chat.meeting_id) {
-    const { data: meeting } = await supabaseClient
+    const { data: meeting } = await chatSupabase
       .from(TABLES.meetings)
       .select('id, title, creator_id, topic, location, current_slots, max_slots')
       .eq('id', chat.meeting_id)
@@ -1008,20 +1338,20 @@ async function loadChatInfo(chat) {
       <div class="meeting-tag">#${topicName}</div>
       <a class="meeting-title" href="meeting.html?id=${meeting?.id || ''}">${meeting?.title || 'Встреча'}</a>
       <div class="meeting-meta">
-        <div>👥 ${meeting?.current_slots || 0}/${meeting?.max_slots || 0}</div>
-        <div>📍 ${meeting?.location || 'Город не указан'}</div>
+        <div>Участники: ${meeting?.current_slots || 0}/${meeting?.max_slots || 0}</div>
+        <div>Город: ${meeting?.location || 'не указан'}</div>
       </div>
     `;
     infoContent.appendChild(card);
 
-    const { data: members } = await supabaseClient
+    const { data: members } = await chatSupabase
       .from(TABLES.chat_members)
       .select('user_id, role, status')
       .eq('chat_id', chat.id)
       .eq('status', 'approved');
 
     const memberIds = (members || []).map(m => m.user_id);
-    const { data: profiles } = await supabaseClient
+    const { data: profiles } = await chatSupabase
       .from(TABLES.profiles)
       .select('id, full_name, username, age, photo_URL')
       .in('id', memberIds);
@@ -1062,7 +1392,20 @@ async function loadChatInfo(chat) {
   } else {
     const peerId = chat._peerId
       || (chat.owner_id && chat.owner_id !== currentUser.id ? chat.owner_id : null);
-    const { data: peerProfile } = await supabaseClient
+
+    if (!peerId) {
+      // Service/system direct chats may not have a second user.
+      const card = document.createElement('div');
+      card.className = 'info-profile';
+      card.innerHTML = `
+        <div class="info-name">${chat.title || 'Чат'}</div>
+        <div class="info-age">Служебный чат</div>
+      `;
+      infoContent.appendChild(card);
+      return;
+    }
+
+    const { data: peerProfile } = await chatSupabase
       .from(TABLES.profiles)
       .select('id, full_name, username, age, photo_URL')
       .eq('id', peerId)
@@ -1111,7 +1454,24 @@ function getTopicName(topicId) {
   return fallback[topicId] || topicId;
 }
 
+function setupReportButton() {
+  const reportBtn = document.getElementById('chat-report-btn');
+  if (!reportBtn) return;
+  
+  reportBtn.addEventListener('click', () => {
+    if (!currentChat) return;
+    
+    const chatName = currentChat.meeting_id ? currentChat.title : (currentChat.display_title || currentChat.title);
+    if (typeof window.openReportModal === 'function') {
+      window.openReportModal('chat', currentChat.id, chatName);
+    }
+  });
+}
+
 window.addEventListener('beforeunload', () => {
   stopMessagePolling();
   stopChatListPolling();
 });
+
+
+

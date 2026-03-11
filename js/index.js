@@ -74,6 +74,28 @@ function updateUserUI(user) {
   const createBtn = document.getElementById('create-meeting-btn');
 
   if (user) {
+    // Check if user is banned
+    if (currentProfile?.role === 'banned') {
+      if (authButton) authButton.style.display = 'none';
+      if (myEventsButton) myEventsButton.style.display = 'none';
+      if (chatButton) chatButton.style.display = 'none';
+      if (createBtn) createBtn.href = '#';
+      userName.textContent = 'Аккаунт заблокирован';
+      userAvatar.innerHTML = `<img src="${DEFAULT_AVATAR}" alt="Заблокирован">`;
+      userAvatar.className = 'user-avatar';
+      // Show banned message
+      const feed = document.getElementById('meetings-feed');
+      if (feed) {
+        feed.innerHTML = `
+          <div class="empty-state">
+            <h3>Ваш аккаунт заблокирован</h3>
+            <p>Вы не можете создавать встречи, участвовать в них или общаться с другими пользователями.</p>
+          </div>
+        `;
+      }
+      return;
+    }
+
     if (authButton) authButton.style.display = 'none';
     if (myEventsButton) {
       myEventsButton.style.display = 'flex';
@@ -91,6 +113,7 @@ function updateUserUI(user) {
       userLink.href = `profile.html?id=${user.id}`;
       userLink.style.cursor = 'pointer';
     }
+    startChatBadgePolling();
   } else {
     if (authButton) {
       authButton.style.display = 'flex';
@@ -108,6 +131,7 @@ function updateUserUI(user) {
       userLink.style.cursor = 'default';
       userLink.onclick = (e) => e.preventDefault();
     }
+    stopChatBadgePolling();
   }
 }
 
@@ -519,16 +543,37 @@ async function joinMeeting(meetingId) {
     return;
   }
 
+  if (currentProfile?.role === 'banned') {
+    showNotification('Ваш аккаунт заблокирован. Вы не можете принимать участие в встречах', 'error');
+    return;
+  }
+
   try {
     const { data: meeting } = await supabaseClient
       .from('meetings')
-      .select('current_slots, max_slots')
+      .select('current_slots, max_slots, creator_id')
       .eq('id', meetingId)
       .single();
 
     if (!meeting) {
       showNotification('Встреча не найдена', 'error');
       return;
+    }
+    
+    // Check if creator has blocked current user
+    if (meeting.creator_id) {
+      const isBlockedByCreator = await checkIfBlockedByUser(meeting.creator_id);
+      if (isBlockedByCreator) {
+        showNotification('Организатор встречи вас заблокировал', 'error');
+        return;
+      }
+
+      // Check if current user has blocked event creator
+      const hasBlockedCreator = await hasCurrentUserBlocked(meeting.creator_id);
+      if (hasBlockedCreator) {
+        showNotification('Вы заблокировали организатора этой встречи', 'error');
+        return;
+      }
     }
 
     if (meeting.current_slots >= meeting.max_slots) {
@@ -611,11 +656,81 @@ window.showCreateModal = showCreateModal;
 window.joinMeeting = joinMeeting;
 window.filterMeetings = filterMeetings;
 
+let chatBadgeInterval = null;
+
+async function updateChatBadge() {
+  const badge = document.getElementById('chat-badge');
+  if (!badge || !currentUser) return;
+
+  try {
+    const UNREAD_KEY = 'pulse_chat_last_read';
+    let readMap = {};
+    try {
+      const raw = localStorage.getItem(UNREAD_KEY);
+      readMap = raw ? JSON.parse(raw) : {};
+    } catch (e) { /* ignore */ }
+
+    // Get chats the user is a member of
+    const { data: memberships, error: memErr } = await supabaseClient
+      .from(TABLES.chat_members)
+      .select('chat_id')
+      .eq('user_id', currentUser.id)
+      .eq('status', 'approved');
+
+    if (memErr || !memberships || memberships.length === 0) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    const chatIds = memberships.map(m => m.chat_id);
+    let total = 0;
+
+    for (const chatId of chatIds) {
+      const readKey = `${currentUser.id}:${chatId}`;
+      const lastRead = readMap[readKey];
+      let query = supabaseClient
+        .from(TABLES.chat_messages)
+        .select('id', { count: 'exact', head: true })
+        .eq('chat_id', chatId)
+        .neq('user_id', currentUser.id);
+      if (lastRead) {
+        query = query.gt('created_at', lastRead);
+      }
+      const { count } = await query;
+      total += count || 0;
+    }
+
+    if (total > 0) {
+      badge.textContent = total > 99 ? '99+' : String(total);
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (e) {
+    // Silently ignore errors to avoid disrupting the page
+  }
+}
+
+function startChatBadgePolling() {
+  updateChatBadge();
+  if (chatBadgeInterval) clearInterval(chatBadgeInterval);
+  chatBadgeInterval = setInterval(updateChatBadge, 30000);
+}
+
+function stopChatBadgePolling() {
+  if (chatBadgeInterval) {
+    clearInterval(chatBadgeInterval);
+    chatBadgeInterval = null;
+  }
+  const badge = document.getElementById('chat-badge');
+  if (badge) badge.style.display = 'none';
+}
+
 async function fetchProfile(userId) {
   try {
     const { data } = await supabaseClient
       .from(TABLES.profiles)
-      .select('id, username, full_name, age, photo_URL, email')
+      .select('id, username, full_name, age, photo_URL, email, role')
       .eq('id', userId)
       .single();
     return data || null;
@@ -624,7 +739,37 @@ async function fetchProfile(userId) {
     return null;
   }
 }
+async function checkIfBlockedByUser(otherUserId) {
+  try {
+    const { data, error } = await supabaseClient
+      .from(TABLES.profiles)
+      .select('blocked_users')
+      .eq('id', otherUserId)
+      .single();
+    if (error) return false;
+    const blockedUsers = Array.isArray(data?.blocked_users) ? data.blocked_users : [];
+    return blockedUsers.includes(currentUser.id);
+  } catch (e) {
+    console.error('Error checking block status:', e);
+    return false;
+  }
+}
 
+async function hasCurrentUserBlocked(otherUserId) {
+  if (!currentUser?.id) return false;
+  try {
+    const { data, error } = await supabaseClient
+      .from(TABLES.profiles)
+      .select('blocked_users')
+      .eq('id', currentUser.id)
+      .single();
+    if (error) return false;
+    const blockedUsers = Array.isArray(data?.blocked_users) ? data.blocked_users : [];
+    return blockedUsers.includes(otherUserId);
+  } catch (e) {
+    return false;
+  }
+}
 function setupGlobalSearch() {
   const input = document.getElementById('global-search');
   const results = document.getElementById('search-results');
@@ -751,3 +896,5 @@ function renderMeetingResult(meeting) {
   `;
   return item;
 }
+
+

@@ -1,4 +1,4 @@
-const SUPABASE_URL = (window.ENV && window.ENV.SUPABASE_URL) || '';
+﻿const SUPABASE_URL = (window.ENV && window.ENV.SUPABASE_URL) || '';
 const SUPABASE_ANON_KEY = (window.ENV && window.ENV.SUPABASE_ANON_KEY) || '';
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
@@ -17,8 +17,13 @@ window.APP = {
     topics: 'topics',
     chats: 'chats',
     chat_members: 'chat_members',
-    chat_messages: 'chat_messages'
+    chat_messages: 'chat_messages',
+    reports: 'reports',
+    bans: 'bans',
+    ban_appeals: 'ban_appeals',
+    notifications: 'notifications'
   }
 };
 
 console.log('Supabase config loaded', window.APP);
+
