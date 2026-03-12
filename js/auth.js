@@ -1,4 +1,4 @@
-﻿const app = window.APP;
+const app = window.APP;
 const supabaseClient = app.supabase;
 const { TABLES } = app;
 
@@ -26,6 +26,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
 });
 
+function isValidEmojiIcon(value) {
+  if (typeof value !== 'string') return false;
+  const v = value.trim();
+  if (!v) return false;
+  return /^[\p{Extended_Pictographic}\uFE0F\u200D]+$/u.test(v);
+}
+
+function resolveCategoryLabel(category) {
+  let displayName = (category?.name || '').trim();
+  let icon = '';
+
+  const explicitIcon = (category?.icon || '').trim();
+  if (isValidEmojiIcon(explicitIcon)) {
+    icon = explicitIcon;
+  }
+
+  if (!icon && displayName) {
+    const emojiMatch = displayName.match(/^([\p{Extended_Pictographic}\uFE0F\u200D]+)\s+/u);
+    if (emojiMatch && isValidEmojiIcon(emojiMatch[1])) {
+      icon = emojiMatch[1];
+      displayName = displayName.slice(emojiMatch[0].length).trim();
+    }
+  }
+
+  return { icon, displayName };
+}
+
 function initCategories() {
   const container = document.getElementById('categories-container');
   if (!container) return;
@@ -34,21 +61,13 @@ function initCategories() {
     const checkboxId = `category-${category.id}`;
     const wrapper = document.createElement('div');
     
-    // Extract icon from name if not separate (e.g., "🎲 Настольные игры" -> icon: "🎲", name: "Настольные игры")
-    let icon = category.icon || '';
-    let displayName = category.name;
-    if (!icon && category.name) {
-      const emojiMatch = category.name.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}])\s*/u);
-      if (emojiMatch) {
-        icon = emojiMatch[0].trim();
-        displayName = category.name.substring(emojiMatch[0].length).trim();
-      }
-    }
+    const { icon, displayName } = resolveCategoryLabel(category);
+    const iconHtml = icon ? `<span class="category-icon">${icon}</span>` : '';
     
     wrapper.innerHTML = `
       <input type="checkbox" id="${checkboxId}" class="category-checkbox" value="${category.id}">
       <label for="${checkboxId}" class="category-label">
-        <span class="category-icon">${icon}</span>
+        ${iconHtml}
         <span>${displayName}</span>
       </label>
     `;
@@ -210,50 +229,56 @@ async function validateStep1() {
   resetErrors(['email', 'password', 'name', 'age', 'gender', 'city', 'username']);
 
   if (!email || !isValidEmail(email)) {
-    showError('email-error', 'Введите корректный email');
+    showError('email-error', 'Р’РІРµРґРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ email');
     isValid = false;
   }
 
   if (!password || password.length < 6) {
-    showError('password-error', 'Пароль должен быть не менее 6 символов');
+    showError('password-error', 'РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РјРµРЅРµРµ 6 СЃРёРјРІРѕР»РѕРІ');
     isValid = false;
   }
 
   if (!fullName) {
-    showError('name-error', 'Введите ваше имя');
+    showError('name-error', 'Р’РІРµРґРёС‚Рµ РІР°С€Рµ РёРјСЏ');
     isValid = false;
   }
 
   if (!age || age < 18 || age > 100) {
-    showError('age-error', 'Возраст должен быть от 18 до 100 лет');
+    showError('age-error', 'Р’РѕР·СЂР°СЃС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РѕС‚ 18 РґРѕ 100 Р»РµС‚');
     isValid = false;
   }
 
   if (!gender) {
-    showError('gender-error', 'Выберите ваш пол');
+    showError('gender-error', 'Р’С‹Р±РµСЂРёС‚Рµ РІР°С€ РїРѕР»');
     isValid = false;
   }
 
   if (!city) {
-    showError('city-error', 'Укажите город или район');
+    showError('city-error', 'РЈРєР°Р¶РёС‚Рµ РіРѕСЂРѕРґ РёР»Рё СЂР°Р№РѕРЅ');
     isValid = false;
   }
 
   if (!username) {
-    showError('username-error', 'Введите никнейм');
+    showError('username-error', 'Р’РІРµРґРёС‚Рµ РЅРёРєРЅРµР№Рј');
     isValid = false;
   } else if (username.length < 3) {
-    showError('username-error', 'Никнейм должен быть не менее 3 символов');
+    showError('username-error', 'РќРёРєРЅРµР№Рј РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РјРµРЅРµРµ 3 СЃРёРјРІРѕР»РѕРІ');
     isValid = false;
   } else if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    showError('username-error', 'Только латинские буквы, цифры и подчеркивание');
+    showError('username-error', 'РўРѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹, С†РёС„СЂС‹ Рё РїРѕРґС‡РµСЂРєРёРІР°РЅРёРµ');
     isValid = false;
   }
 
   if (isValid) {
+    const emailAvailable = await checkEmailImmediately(email);
+    if (!emailAvailable) {
+      showError('email-error', 'Этот email уже зарегистрирован');
+      return;
+    }
+
     const usernameAvailable = await checkUsernameImmediately(username);
     if (!usernameAvailable) {
-      showError('username-error', 'Этот никнейм уже занят');
+      showError('username-error', 'Р­С‚РѕС‚ РЅРёРєРЅРµР№Рј СѓР¶Рµ Р·Р°РЅСЏС‚');
       return;
     }
     goToStep(2);
@@ -268,7 +293,7 @@ function validateStep2() {
   resetErrors(['categories']);
 
   if (selectedCategories.length === 0) {
-    showError('categories-error', 'Выберите хотя бы одну категорию');
+    showError('categories-error', 'Р’С‹Р±РµСЂРёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРЅСѓ РєР°С‚РµРіРѕСЂРёСЋ');
     return;
   }
 
@@ -280,7 +305,7 @@ async function validateStep3() {
 
   const button = document.getElementById('next-step-3');
   const originalText = button.textContent;
-  button.innerHTML = '<span class="loading"></span> Регистрируем...';
+  button.innerHTML = '<span class="loading"></span> Р РµРіРёСЃС‚СЂРёСЂСѓРµРј...';
   button.disabled = true;
 
   // Declared outside try so the catch block can use them for recovery
@@ -346,58 +371,20 @@ async function validateStep3() {
     if (authError) throw authError;
 
     await buildAndInsertProfile(authData.user.id);
-
-    showNotification('Аккаунт создан', 'success');
-    setTimeout(() => { window.location.href = 'index.html'; }, 500);
-
+    showNotification('РђРєРєР°СѓРЅС‚ СЃРѕР·РґР°РЅ', 'success');
+    setTimeout(() => {
+      window.location.href = 'index.html';
+    }, 500);
   } catch (error) {
-    console.error('Ошибка регистрации:', error);
-
-    const isAlreadyRegistered =
-      error?.message?.includes('User already registered') ||
-      error?.message?.includes('already registered') ||
-      error?.code === '23505';
-
-    if (isAlreadyRegistered) {
-      // Email exists in auth.users — check whether the profile row was ever created
-      try {
-        const { data: existingProfile } = await supabaseClient
-          .from(TABLES.profiles)
-          .select('id')
-          .eq('email', email)
-          .maybeSingle();
-
-        if (existingProfile) {
-          // Profile exists → normal "already registered" case
-          showNotification('Этот email уже зарегистрирован. Войдите в аккаунт.', 'error');
-          const loginLink = document.querySelector('.login-link a');
-          if (loginLink) loginLink.textContent = 'Войти в аккаунт';
-          return;
-        }
-
-        // No profile → previous registration was incomplete. Try to sign in and finish setup.
-        button.innerHTML = '<span class="loading"></span> Восстанавливаем аккаунт...';
-        const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({ email, password });
-
-        if (signInError) {
-          // Can't sign in — different password or unconfirmed email
-          showNotification('Этот email уже зарегистрирован, но профиль не завершён. Войдите в аккаунт или сбросьте пароль.', 'error');
-          const loginLink = document.querySelector('.login-link a');
-          if (loginLink) loginLink.textContent = 'Войти в аккаунт';
-          return;
-        }
-
-        // Signed in successfully — create the missing profile
-        await buildAndInsertProfile(signInData.user.id);
-        showNotification('Профиль восстановлен!', 'success');
-        setTimeout(() => { window.location.href = 'index.html'; }, 500);
-
-      } catch (recoveryError) {
-        console.error('Ошибка восстановления:', recoveryError);
-        showNotification(recoveryError.message || 'Ошибка при создании профиля', 'error');
+    console.error('РћС€РёР±РєР° СЂРµРіРёСЃС‚СЂР°С†РёРё:', error);
+    if (error?.message?.includes('User already registered')) {
+      showNotification('Р­С‚РѕС‚ email СѓР¶Рµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ. Р’РѕР№РґРёС‚Рµ РІ Р°РєРєР°СѓРЅС‚.', 'error');
+      const loginLink = document.querySelector('.login-link a');
+      if (loginLink) {
+        loginLink.textContent = 'Р’РѕР№С‚Рё РІ Р°РєРєР°СѓРЅС‚';
       }
     } else {
-      showNotification(error.message || 'Ошибка регистрации', 'error');
+      showNotification(error.message || 'РћС€РёР±РєР° СЂРµРіРёСЃС‚СЂР°С†РёРё', 'error');
     }
   } finally {
     button.textContent = originalText;
@@ -415,7 +402,7 @@ async function checkUsername() {
   }
 
   if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    showError('username-error', 'Только латинские буквы, цифры и подчеркивание');
+    showError('username-error', 'РўРѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹, С†РёС„СЂС‹ Рё РїРѕРґС‡РµСЂРєРёРІР°РЅРёРµ');
     hideUsernameStatus();
     return;
   }
@@ -451,23 +438,41 @@ async function checkUsernameImmediately(username) {
     if (error) throw error;
     return !data;
   } catch (error) {
-    console.error('Ошибка проверки никнейма:', error);
-    // Если проверка недоступна (например, из-за RLS), не блокируем регистрацию
+    console.error('РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РЅРёРєРЅРµР№РјР°:', error);
+    // Р•СЃР»Рё РїСЂРѕРІРµСЂРєР° РЅРµРґРѕСЃС‚СѓРїРЅР° (РЅР°РїСЂРёРјРµСЂ, РёР·-Р·Р° RLS), РЅРµ Р±Р»РѕРєРёСЂСѓРµРј СЂРµРіРёСЃС‚СЂР°С†РёСЋ
     return true;
   }
 }
+async function checkEmailImmediately(email) {
+  try {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) return false;
 
+    const { data, error } = await supabaseClient
+      .from(TABLES.profiles)
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (error) throw error;
+    return !data;
+  } catch (error) {
+    console.error('Ошибка проверки email:', error);
+    // Не блокируем шаг при временной недоступности проверки.
+    return true;
+  }
+}
 function handleAvatarUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
 
   if (!file.type.startsWith('image/')) {
-    showError('avatar-error', 'Выберите изображение');
+    showError('avatar-error', 'Р’С‹Р±РµСЂРёС‚Рµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ');
     return;
   }
 
   if (file.size > 5 * 1024 * 1024) {
-    showError('avatar-error', 'Изображение должно быть меньше 5MB');
+    showError('avatar-error', 'РР·РѕР±СЂР°Р¶РµРЅРёРµ РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ РјРµРЅСЊС€Рµ 5MB');
     return;
   }
 
@@ -476,8 +481,8 @@ function handleAvatarUpload(event) {
   const reader = new FileReader();
   reader.onload = function(e) {
     const avatarPreview = document.getElementById('avatar-preview');
-    avatarPreview.innerHTML = `<img src="${e.target.result}" alt="Аватар">`;
-    document.getElementById('upload-text').textContent = 'Изменить фото';
+    avatarPreview.innerHTML = `<img src="${e.target.result}" alt="РђРІР°С‚Р°СЂ">`;
+    document.getElementById('upload-text').textContent = 'РР·РјРµРЅРёС‚СЊ С„РѕС‚Рѕ';
     document.getElementById('avatar-error').classList.remove('show');
   };
   reader.readAsDataURL(file);
@@ -542,5 +547,3 @@ function debounce(func, wait) {
     usernameCheckTimeout = setTimeout(later, wait);
   };
 }
-
-

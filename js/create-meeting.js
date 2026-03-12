@@ -4,7 +4,7 @@ let isSubmitting = false;
 let editingMeetingId = null;
 let currentUser = null;
 let currentProfile = null;
-const MAX_LIFETIME_HOURS = 24;
+const MAX_LIFETIME_HOURS = 72;
 const TIME_STEP_MINUTES = 15;
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -20,9 +20,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     editingMeetingId = editId;
     await loadMeetingForEdit(editId);
     const titleEl = document.querySelector('.title');
-    if (titleEl) titleEl.textContent = 'Редактировать встречу';
+    if (titleEl) titleEl.textContent = 'Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ РІСЃС‚СЂРµС‡Сѓ';
     const submitBtn = document.querySelector('button[type="submit"]');
-    if (submitBtn) submitBtn.textContent = 'Сохранить изменения';
+    if (submitBtn) submitBtn.textContent = 'РЎРѕС…СЂР°РЅРёС‚СЊ РёР·РјРµРЅРµРЅРёСЏ';
   }
 
   document.getElementById('create-meeting-form').addEventListener('submit', handleCreateMeeting);
@@ -65,7 +65,7 @@ function setupExpiresInputs() {
     if (end < start) {
       const option = document.createElement('option');
       option.value = '';
-      option.textContent = 'Нет доступного времени';
+      option.textContent = 'РќРµС‚ РґРѕСЃС‚СѓРїРЅРѕРіРѕ РІСЂРµРјРµРЅРё';
       timeSelect.appendChild(option);
       timeSelect.disabled = true;
       return;
@@ -151,7 +151,7 @@ function handleCreateMeeting(event) {
   }
   
   if (!supabaseClient) {
-    showNotification('Supabase не подключен');
+    showNotification('Supabase РЅРµ РїРѕРґРєР»СЋС‡РµРЅ');
     console.error('Supabase client missing in create-meeting.js');
     return;
   }
@@ -165,7 +165,7 @@ function handleCreateMeeting(event) {
   const timeValue = document.getElementById('meeting-expires-time')?.value;
 
   if (!headline || !topic || !maxSlots || !city || !details || !dateValue || !timeValue) {
-    showNotification('Заполните все обязательные поля');
+    showNotification('Р—Р°РїРѕР»РЅРёС‚Рµ РІСЃРµ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РїРѕР»СЏ');
     return;
   }
 
@@ -173,11 +173,11 @@ function handleCreateMeeting(event) {
   const expires = new Date(`${dateValue}T${timeValue}:00`);
   const diffMs = expires.getTime() - now.getTime();
   if (Number.isNaN(expires.getTime()) || diffMs <= 0) {
-    showNotification('Выберите корректное время жизни');
+    showNotification('Р’С‹Р±РµСЂРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅРѕРµ РІСЂРµРјСЏ Р¶РёР·РЅРё');
     return;
   }
   if (diffMs > MAX_LIFETIME_HOURS * 60 * 60 * 1000) {
-    showNotification('Можно выбрать только в пределах 24 часов');
+    showNotification('РњРѕР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ С‚РѕР»СЊРєРѕ РІ РїСЂРµРґРµР»Р°С… 72 С‡Р°СЃРѕРІ');
     return;
   }
 
@@ -242,14 +242,14 @@ async function createMeetingInDb(payload) {
       .single();
 
     if (chatError) {
-      console.error('❌ Ошибка создания чата:', chatError);
+      console.error('вќЊ РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ С‡Р°С‚Р°:', chatError);
       console.error('   Full error:', JSON.stringify(chatError, null, 2));
       console.error('   Error code:', chatError.code);
       console.error('   Error message:', chatError.message);
       console.error('   Error status:', chatError.status);
       // Don't throw - meeting was already created
     } else if (chatData?.id) {
-      console.log('✅ Chat created:', chatData.id);
+      console.log('вњ… Chat created:', chatData.id);
       
       // Add creator to chat members
       const { error: memberError } = await supabaseClient
@@ -257,10 +257,10 @@ async function createMeetingInDb(payload) {
         .insert([{ chat_id: chatData.id, user_id: user.id, role: 'owner', status: 'approved' }]);
 
       if (memberError) {
-        console.error('❌ Ошибка добавления владельца в чат:', memberError);
+        console.error('вќЊ РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РІР»Р°РґРµР»СЊС†Р° РІ С‡Р°С‚:', memberError);
         console.error('   Error details:', JSON.stringify(memberError, null, 2));
       } else {
-        console.log('✅ Creator added to chat members');
+        console.log('вњ… Creator added to chat members');
       }
 
       // Update meeting with chat_id
@@ -270,22 +270,22 @@ async function createMeetingInDb(payload) {
         .eq('id', data.id);
 
       if (updateError) {
-        console.error('❌ Ошибка обновления chat_id в встрече:', updateError);
+        console.error('вќЊ РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ chat_id РІ РІСЃС‚СЂРµС‡Рµ:', updateError);
         console.error('   Error details:', JSON.stringify(updateError, null, 2));
       } else {
-        console.log('✅ Meeting updated with chat_id');
+        console.log('вњ… Meeting updated with chat_id');
       }
     } else {
-      console.error('❌ Chat creation returned no data:', chatData);
+      console.error('вќЊ Chat creation returned no data:', chatData);
     }
 
-    showNotification('✅ Встреча опубликована!');
+    showNotification('вњ… Р’СЃС‚СЂРµС‡Р° РѕРїСѓР±Р»РёРєРѕРІР°РЅР°!');
     setTimeout(() => {
       window.location.href = `meeting.html?id=${data.id}`;
     }, 600);
   } catch (error) {
-    console.error('Ошибка создания встречи:', error);
-    showNotification('Ошибка: ' + error.message);
+    console.error('РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РІСЃС‚СЂРµС‡Рё:', error);
+    showNotification('РћС€РёР±РєР°: ' + error.message);
   } finally {
     isSubmitting = false;
     const submitBtn = document.querySelector('#create-meeting-form .btn');
@@ -330,17 +330,17 @@ async function updateMeetingInDb(meetingId, payload) {
 
     if (!data || data.length === 0) {
       console.error('No meeting was updated. Possible reasons: meeting not found, not the owner, or RLS policy issue');
-      throw new Error('Не удалось обновить встречу. Возможно, у вас нет прав на редактирование.');
+      throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РІСЃС‚СЂРµС‡Сѓ. Р’РѕР·РјРѕР¶РЅРѕ, Сѓ РІР°СЃ РЅРµС‚ РїСЂР°РІ РЅР° СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ.');
     }
 
     console.log('Meeting updated successfully:', data);
-    showNotification('✅ Встреча обновлена!');
+    showNotification('вњ… Р’СЃС‚СЂРµС‡Р° РѕР±РЅРѕРІР»РµРЅР°!');
     setTimeout(() => {
       window.location.href = `meeting.html?id=${meetingId}`;
     }, 600);
   } catch (error) {
-    console.error('Ошибка обновления встречи:', error);
-    showNotification('Ошибка: ' + (error.message || 'Не удалось обновить встречу'));
+    console.error('РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ РІСЃС‚СЂРµС‡Рё:', error);
+    showNotification('РћС€РёР±РєР°: ' + (error.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РІСЃС‚СЂРµС‡Сѓ'));
   } finally {
     isSubmitting = false;
     const submitBtn = document.querySelector('#create-meeting-form .btn');
@@ -365,7 +365,7 @@ async function loadMeetingForEdit(meetingId) {
       throw error;
     }
     if (!meeting) {
-      alert('Встреча не найдена');
+      alert('Р’СЃС‚СЂРµС‡Р° РЅРµ РЅР°Р№РґРµРЅР°');
       window.location.href = 'index.html';
       return;
     }
@@ -375,7 +375,7 @@ async function loadMeetingForEdit(meetingId) {
     // Check if current user is the creator
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (meeting.creator_id !== user?.id) {
-      alert('Вы не можете редактировать эту встречу');
+      alert('Р’С‹ РЅРµ РјРѕР¶РµС‚Рµ СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЌС‚Сѓ РІСЃС‚СЂРµС‡Сѓ');
       window.location.href = 'index.html';
       return;
     }
@@ -404,9 +404,12 @@ async function loadMeetingForEdit(meetingId) {
     }
 
   } catch (error) {
-    console.error('Ошибка загрузки встречи:', error);
-    alert('Ошибка загрузки встречи');
+    console.error('РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РІСЃС‚СЂРµС‡Рё:', error);
+    alert('РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РІСЃС‚СЂРµС‡Рё');
     window.location.href = 'index.html';
   }
 }
+
+
+
 
