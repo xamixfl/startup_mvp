@@ -168,6 +168,9 @@ async function deleteExpiredMeeting(meetingId) {
   }
 }
 
+/**
+ * Submit a report for a chat, user, or event
+ */
 // Make functions globally available
 window.fetchTopics = fetchTopics;
 window.cleanupExpiredMeetings = cleanupExpiredMeetings;

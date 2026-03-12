@@ -1,10 +1,11 @@
-﻿const app = window.APP;
+const app = window.APP;
 const supabaseClient = app.supabase;
 const { TABLES } = app;
 
 let currentStep = 1;
 let avatarFile = null;
 let usernameCheckTimeout = null;
+let categoryMenuOpen = false;
 
 // Categories will be fetched from database
 let CATEGORIES = [];
@@ -72,6 +73,10 @@ function initCategories() {
     `;
     container.appendChild(wrapper);
   });
+
+  // Keep trigger label in sync with selected categories.
+  container.addEventListener('change', updateSelectedCategoriesLabel);
+  updateSelectedCategoriesLabel();
 }
 
 function setupEventListeners() {
@@ -89,6 +94,108 @@ function setupEventListeners() {
   document.getElementById('go-to-login').addEventListener('click', () => {
     window.location.href = 'login.html';
   });
+
+  setupCategoriesDropdown();
+}
+
+function setupCategoriesDropdown() {
+  const trigger = document.getElementById('categories-trigger');
+  const menu = document.getElementById('categories-menu');
+  const searchInput = document.getElementById('categories-search');
+  const dropdown = document.getElementById('categories-dropdown');
+
+  if (!trigger || !menu || !searchInput || !dropdown) return;
+
+  trigger.addEventListener('click', () => {
+    if (categoryMenuOpen) {
+      closeCategoriesMenu();
+    } else {
+      openCategoriesMenu();
+    }
+  });
+
+  searchInput.addEventListener('input', (event) => {
+    filterCategoriesList(event.target.value);
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!dropdown.contains(event.target)) {
+      closeCategoriesMenu();
+    }
+  });
+}
+
+function openCategoriesMenu() {
+  const trigger = document.getElementById('categories-trigger');
+  const menu = document.getElementById('categories-menu');
+  const searchInput = document.getElementById('categories-search');
+  if (!trigger || !menu) return;
+
+  categoryMenuOpen = true;
+  trigger.classList.add('open');
+  trigger.setAttribute('aria-expanded', 'true');
+  menu.classList.add('open');
+  if (searchInput) {
+    searchInput.focus();
+    filterCategoriesList(searchInput.value || '');
+  }
+}
+
+function closeCategoriesMenu() {
+  const trigger = document.getElementById('categories-trigger');
+  const menu = document.getElementById('categories-menu');
+  if (!trigger || !menu) return;
+
+  categoryMenuOpen = false;
+  trigger.classList.remove('open');
+  trigger.setAttribute('aria-expanded', 'false');
+  menu.classList.remove('open');
+}
+
+function filterCategoriesList(searchTerm) {
+  const listContainer = document.getElementById('categories-container');
+  const emptyState = document.getElementById('categories-empty');
+  if (!listContainer || !emptyState) return;
+
+  const term = (searchTerm || '').trim().toLowerCase();
+  const wrappers = Array.from(listContainer.children);
+  let visibleCount = 0;
+
+  wrappers.forEach((wrapper) => {
+    const labelText = wrapper.querySelector('.category-label span:last-child')?.textContent?.toLowerCase() || '';
+    const isVisible = !term || labelText.includes(term);
+    wrapper.style.display = isVisible ? '' : 'none';
+    if (isVisible) visibleCount += 1;
+  });
+
+  emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+}
+
+function updateSelectedCategoriesLabel() {
+  const triggerText = document.getElementById('categories-trigger-text');
+  const pillsContainer = document.getElementById('selected-interests');
+  if (!triggerText) return;
+
+  const selectedLabels = Array.from(document.querySelectorAll('.category-checkbox:checked'))
+    .map((checkbox) => checkbox.nextElementSibling?.querySelector('span:last-child')?.textContent)
+    .filter(Boolean);
+
+  if (pillsContainer) {
+    pillsContainer.innerHTML = '';
+    selectedLabels.forEach((label) => {
+      const pill = document.createElement('span');
+      pill.className = 'selected-interest-pill';
+      pill.textContent = label;
+      pillsContainer.appendChild(pill);
+    });
+  }
+
+  if (selectedLabels.length === 0) {
+    triggerText.textContent = 'Выберите категории';
+    return;
+  }
+
+  triggerText.textContent = `Выбрано категорий: ${selectedLabels.length}`;
 }
 
 function goToStep(step) {
@@ -201,19 +308,50 @@ async function validateStep3() {
   button.innerHTML = '<span class="loading"></span> Р РµРіРёСЃС‚СЂРёСЂСѓРµРј...';
   button.disabled = true;
 
-  try {
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const fullName = document.getElementById('full-name').value.trim();
-    const age = parseInt(document.getElementById('age').value);
-    const gender = document.getElementById('gender').value;
-    const city = document.getElementById('city').value.trim();
-    const username = document.getElementById('username').value.trim();
-    const about = document.getElementById('bio')?.value.trim() || '';
-    const selectedCategories = Array.from(
-      document.querySelectorAll('.category-checkbox:checked')
-    ).map(cb => cb.value);
+  // Declared outside try so the catch block can use them for recovery
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const fullName = document.getElementById('full-name').value.trim();
+  const age = parseInt(document.getElementById('age').value);
+  const gender = document.getElementById('gender').value;
+  const city = document.getElementById('city').value.trim();
+  const username = document.getElementById('username').value.trim();
+  const about = document.getElementById('bio')?.value.trim() || '';
+  const selectedCategories = Array.from(
+    document.querySelectorAll('.category-checkbox:checked')
+  ).map(cb => cb.value);
 
+  async function buildAndInsertProfile(userId) {
+    let publicUrl = 'user';
+    if (avatarFile) {
+      const avatarPath = buildSafeAvatarPath(userId, avatarFile);
+      const { error: uploadError } = await supabaseClient.storage
+        .from('profiles')
+        .upload(avatarPath, avatarFile, { cacheControl: '3600', upsert: false });
+      if (uploadError) throw uploadError;
+      const { data } = supabaseClient.storage.from('profiles').getPublicUrl(avatarPath);
+      publicUrl = data?.publicUrl || 'user';
+    }
+    const { error: profileError } = await supabaseClient
+      .from(TABLES.profiles)
+      .insert([{
+        id: userId,
+        email: email,
+        username: username,
+        full_name: fullName,
+        age: String(age),
+        sex: gender,
+        location: city,
+        photo_URL: publicUrl,
+        interests: selectedCategories,
+        about: about,
+        role: 'user',
+        blocked_users: []
+      }]);
+    if (profileError) throw profileError;
+  }
+
+  try {
     const { data: authData, error: authError } = await supabaseClient.auth.signUp({
       email,
       password,
@@ -232,43 +370,7 @@ async function validateStep3() {
 
     if (authError) throw authError;
 
-    const userId = authData.user.id;
-
-    let publicUrl = 'user';
-    if (avatarFile) {
-      const avatarPath = buildSafeAvatarPath(userId, avatarFile);
-      const { error: uploadError } = await supabaseClient.storage
-        .from('profiles')
-        .upload(avatarPath, avatarFile, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabaseClient.storage
-        .from('profiles')
-        .getPublicUrl(avatarPath);
-      publicUrl = data?.publicUrl || 'user';
-    }
-
-    const { error: profileError } = await supabaseClient
-      .from(TABLES.profiles)
-      .insert([{
-        id: userId,
-        email: email,
-        username: username,
-        full_name: fullName,
-        age: String(age),
-        sex: gender,
-        location: city,
-        photo_URL: publicUrl || 'user',
-        interests: selectedCategories,
-        about: about
-      }]);
-
-    if (profileError) throw profileError;
-
+    await buildAndInsertProfile(authData.user.id);
     showNotification('РђРєРєР°СѓРЅС‚ СЃРѕР·РґР°РЅ', 'success');
     setTimeout(() => {
       window.location.href = 'index.html';
@@ -445,8 +547,3 @@ function debounce(func, wait) {
     usernameCheckTimeout = setTimeout(later, wait);
   };
 }
-
-
-
-
-

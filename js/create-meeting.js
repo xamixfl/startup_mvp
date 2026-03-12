@@ -1,4 +1,4 @@
-﻿const supabaseClient = window.APP?.supabase;
+const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
 let isSubmitting = false;
 let editingMeetingId = null;
@@ -108,6 +108,26 @@ async function checkAuthOrRedirect() {
   const { data: { user } } = await supabaseClient.auth.getUser();
   if (!user) {
     window.location.href = 'login.html';
+    return;
+  }
+  currentUser = user;
+
+  // Fetch profile to check role
+  try {
+    const { data: profile } = await supabaseClient
+      .from(TABLES.profiles)
+      .select('id, role')
+      .eq('id', user.id)
+      .single();
+    currentProfile = profile || {};
+    
+    // If banned, show message and redirect
+    if (currentProfile.role === 'banned') {
+      alert('Ваш аккаунт заблокирован. Вы не можете создавать встречи.');
+      window.location.href = 'index.html';
+    }
+  } catch (error) {
+    console.error('Error fetching profile:', error);
   }
 }
 
@@ -123,6 +143,13 @@ function showNotification(message) {
 function handleCreateMeeting(event) {
   event.preventDefault();
   if (isSubmitting) return;
+  
+  // Check if banned
+  if (currentProfile?.role === 'banned') {
+    showNotification('Ваш аккаунт заблокирован. Вы не можете создавать встречи', 'error');
+    return;
+  }
+  
   if (!supabaseClient) {
     showNotification('Supabase РЅРµ РїРѕРґРєР»СЋС‡РµРЅ');
     console.error('Supabase client missing in create-meeting.js');

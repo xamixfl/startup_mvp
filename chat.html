@@ -41,6 +41,30 @@
       font-weight: 700;
       font-size: 18px;
       border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sidebar-back-btn {
+      width: 46px;
+      height: 30px;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      background: #f8fafc;
+      color: #334155;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+      transition: all 0.2s;
+    }
+
+    .sidebar-back-btn:hover {
+      background: #eef2ff;
+      border-color: #c7d2fe;
     }
 
     .chat-list {
@@ -80,6 +104,30 @@
     .chat-item.active {
       background: #eff6ff;
       border-color: #bfdbfe;
+    }
+
+    .chat-item-admin {
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border: 1px solid #fbbf24;
+      position: relative;
+      box-shadow: 0 2px 4px rgba(251, 191, 36, 0.1);
+    }
+
+    .chat-item-admin:hover {
+      background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+      border-color: #f59e0b;
+      box-shadow: 0 4px 6px rgba(251, 191, 36, 0.2);
+    }
+
+    .chat-item-admin.active {
+      background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+      border-color: #f59e0b;
+      box-shadow: 0 4px 8px rgba(251, 191, 36, 0.3);
+    }
+
+    .chat-item-admin .chat-item-title {
+      color: #92400e;
+      font-weight: 700;
     }
 
     .chat-item-title {
@@ -128,6 +176,14 @@
       align-items: center;
       justify-content: space-between;
       padding: 0 16px;
+      position: relative;
+    }
+
+    .chat-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
     }
 
     .chat-title {
@@ -313,6 +369,12 @@
       color: #2563eb;
       text-decoration: none;
       font-weight: 600;
+      font-size: 14px;
+      padding: 8px 12px;
+    }
+
+    .info-link:hover {
+      text-decoration: underline;
     }
 
     .info-profile {
@@ -380,6 +442,30 @@
 
     .info-btn.danger:hover {
       background: #fecaca;
+    }
+
+    .btn-report {
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #fde68a;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: 'Poppins', sans-serif;
+      transition: all 0.2s;
+    }
+
+    .btn-report:hover {
+      background: #fde68a;
+      border-color: #fcd34d;
+    }
+
+    .chat-header-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
     }
 
     .meeting-card {
@@ -466,7 +552,10 @@
 <body>
   <div class="app" id="chat-app">
     <aside class="sidebar">
-      <div class="sidebar-header">Чаты</div>
+      <div class="sidebar-header">
+        <a href="index.html" class="sidebar-back-btn" title="К ленте" aria-label="К ленте">←</a>
+        <span>Чаты</span>
+      </div>
       <div class="chat-list" id="chat-list"></div>
       <div class="sidebar-footer">
         Обратная связь:
@@ -476,11 +565,13 @@
 
     <main class="main">
       <div class="chat-header">
-        <div style="display:flex; align-items:center;">
+        <div class="chat-header-left">
           <div class="chat-title" id="chat-title">Выберите чат</div>
           <div class="typing-indicator" id="typing-indicator" style="display:none;">Собеседник печатает...</div>
         </div>
-        <a href="index.html" class="info-link">К ленте</a>
+        <div class="chat-header-actions">
+          <button id="chat-report-btn" class="btn-report" style="display: none;">⚠️ Пожаловаться</button>
+        </div>
       </div>
       <div class="chat-body" id="chat-body">
         <div class="chat-empty">Нет выбранного чата</div>
@@ -510,6 +601,8 @@
   <script src="env.js"></script>
   <script src="js/config.js"></script>
   <script src="js/utils.js"></script>
+  <script src="js/reports-bans.js"></script>
+  <script src="js/reporting.js"></script>
   <script src="js/chat.js"></script>
 </body>
 </html>

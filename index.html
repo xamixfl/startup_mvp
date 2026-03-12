@@ -73,6 +73,30 @@
             color: #3b82f6;
         }
 
+        .nav-link {
+            position: relative;
+        }
+
+        .nav-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            background: #ef4444;
+            color: white;
+            font-size: 10px;
+            font-weight: 700;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            line-height: 1;
+            pointer-events: none;
+            box-shadow: 0 0 0 2px white;
+        }
+
         .user-section {
             display: flex;
             align-items: center;
@@ -752,7 +776,7 @@
         </a>
         <div class="user-section">
             <a id="my-events-button" class="nav-link" href="#" style="display: none;">Мои встречи</a>
-            <a id="chat-button" class="nav-link" href="chat.html" style="display: none;">Чаты</a>
+            <a id="chat-button" class="nav-link" href="chat.html" style="display: none;">Чаты<span id="chat-badge" class="nav-badge"></span></a>
             <a id="user-link" class="user-link" href="#">
                 <div id="user-avatar" class="user-avatar">👤</div>
                 <span id="user-name">Гость</span>

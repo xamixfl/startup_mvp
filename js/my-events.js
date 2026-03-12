@@ -203,12 +203,13 @@ function createMeetingCard(meeting) {
       <div class="creator-name">${creatorName}</div>
     </div>
     ${meeting.role === 'owner' ? `<div class="meeting-menu" data-meeting-id="${meeting.id}">${menuItems}</div>` : ''}
+    <button class="btn-report-card" data-meeting-id="${meeting.id}">⚠️ Пожаловаться</button>
   `;
 
     // Setup click handler for card
     card.onclick = (e) => {
         // Don't navigate if clicking menu button or menu items
-        if (e.target.closest('.meeting-menu-btn') || e.target.closest('.meeting-menu')) {
+        if (e.target.closest('.meeting-menu-btn') || e.target.closest('.meeting-menu') || e.target.closest('.btn-report-card')) {
             return;
         }
         window.location.href = `meeting.html?id=${meeting.id}`;
@@ -220,6 +221,17 @@ function createMeetingCard(meeting) {
         menuBtn.onclick = (e) => {
             e.stopPropagation();
             toggleMeetingMenu(meeting.id, card);
+        };
+    }
+
+    // Setup report button
+    const reportBtn = card.querySelector('.btn-report-card');
+    if (reportBtn) {
+        reportBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (typeof window.openReportModal === 'function') {
+                window.openReportModal('event', meeting.id, meeting.title || 'Встреча');
+            }
         };
     }
 
