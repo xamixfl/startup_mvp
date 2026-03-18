@@ -1,29 +1,19 @@
-﻿const SUPABASE_URL = (window.ENV && window.ENV.SUPABASE_URL) || '';
-const SUPABASE_ANON_KEY = (window.ENV && window.ENV.SUPABASE_ANON_KEY) || '';
+// DB table names used by the frontend.
+// Supabase client was removed in favor of `js/api.js` + local Node/Express API.
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error('Supabase env is missing. Check env.js.');
-}
-
-window.APP = {
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-  supabase: window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY),
-  TABLES: {
-    profiles: 'profiles',
-    meetings: 'meetings',
-    participants: 'table-connector',
-    cities: 'cities',
-    topics: 'topics',
-    chats: 'chats',
-    chat_members: 'chat_members',
-    chat_messages: 'chat_messages',
-    reports: 'reports',
-    bans: 'bans',
-    ban_appeals: 'ban_appeals',
-    notifications: 'notifications'
-  }
+window.APP = window.APP || {};
+window.APP.TABLES = {
+  profiles: 'profiles',
+  meetings: 'meetings',
+  participants: 'participants',
+  cities: 'cities',
+  topics: 'topics',
+  chats: 'chats',
+  chat_members: 'chat_members',
+  chat_messages: 'chat_messages',
+  reports: 'reports',
+  bans: 'bans',
+  ban_appeals: 'ban_appeals',
+  notifications: 'notifications'
 };
-
-console.log('Supabase config loaded', window.APP);
 

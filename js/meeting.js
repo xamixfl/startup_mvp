@@ -1,13 +1,14 @@
-const supabaseClient = window.APP?.supabase;
 const { TABLES } = window.APP || {};
 const DEFAULT_AVATAR = 'assets/avatar.png';
 
-// Topics will be fetched from database
 let TOPICS = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
-  const { data: { user } } = await supabaseClient.auth.getUser();
+  const user = typeof window.getCurrentUser === 'function'
+    ? await window.getCurrentUser()
+    : await api.request('/api/auth/me');
+
   const meetingId = new URLSearchParams(window.location.search).get('id');
   const storedMeeting = meetingId ? getMeetingFromStorage(meetingId) : null;
   const meeting = storedMeeting || (await fetchMeeting(meetingId));
@@ -20,9 +21,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderMeeting(meeting, user);
   await setupChatState(meeting, user);
 
-  document.getElementById('join-button').addEventListener('click', async () => {
-    await requestJoin(meeting, user);
-  });
+  const joinBtn = document.getElementById('join-button');
+  if (joinBtn) {
+    joinBtn.addEventListener('click', async () => {
+      await requestJoin(meeting, user);
+    });
+  }
 });
 
 function getMeetingFromStorage(meetingId) {
@@ -30,30 +34,39 @@ function getMeetingFromStorage(meetingId) {
   if (!raw) return null;
   try {
     const list = JSON.parse(raw);
-    return list.find(item => item.id === meetingId) || null;
-  } catch (error) {
+    return (list || []).find(item => item.id === meetingId) || null;
+  } catch (_e) {
     return null;
   }
 }
 
-function renderMeeting(meeting, user) {
+function renderMeeting(meeting, _user) {
   const topic = TOPICS.find(item => item.id === meeting.topic) || TOPICS[0];
-  const topicLabel = `#${topic.name.replace(/^(\S+)\s/, '')}`;
+  const topicLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
 
-  document.getElementById('meeting-tag').textContent = topicLabel;
-  document.getElementById('meeting-tag').style.background = `${topic.color}20`;
-  document.getElementById('meeting-tag').style.color = topic.color;
-
-  const cityEl = document.getElementById('meeting-city');
-  if (meeting.location) {
-    cityEl.innerHTML = `<span class="location-icon" aria-hidden="true"></span>${meeting.location}`;
-    cityEl.style.display = 'inline-flex';
-  } else {
-    cityEl.style.display = 'none';
+  const tagEl = document.getElementById('meeting-tag');
+  if (tagEl) {
+    tagEl.textContent = topicLabel;
+    if (topic?.color) {
+      tagEl.style.background = `${topic.color}20`;
+      tagEl.style.color = topic.color;
+    }
   }
 
-  document.getElementById('meeting-headline').textContent = meeting.title || 'Без названия';
-  document.getElementById('meeting-details').textContent = meeting.full_description || 'Подробное описание появится позже.';
+  const cityEl = document.getElementById('meeting-city');
+  if (cityEl) {
+    if (meeting.location) {
+      cityEl.innerHTML = `<span class="location-icon" aria-hidden="true"></span>${meeting.location}`;
+      cityEl.style.display = 'inline-flex';
+    } else {
+      cityEl.style.display = 'none';
+    }
+  }
+
+  const titleEl = document.getElementById('meeting-headline');
+  if (titleEl) titleEl.textContent = meeting.title || 'Без названия';
+  const detailsEl = document.getElementById('meeting-details');
+  if (detailsEl) detailsEl.textContent = meeting.full_description || 'Подробное описание появится позже.';
 
   const creatorName = meeting.creator?.full_name || meeting.creator?.username || 'Автор';
   const creatorAge = meeting.creator?.age ? `${meeting.creator.age} лет` : 'Возраст не указан';
@@ -62,47 +75,48 @@ function renderMeeting(meeting, user) {
     : DEFAULT_AVATAR;
 
   const avatarEl = document.getElementById('creator-avatar');
-  avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${creatorName}">`;
+  if (avatarEl) avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${creatorName}">`;
 
   const creatorLink = document.getElementById('creator-name');
-  creatorLink.textContent = creatorName;
-  if (meeting.creator?.id) {
-    creatorLink.href = `profile.html?id=${meeting.creator.id}`;
-  } else {
-    creatorLink.href = '#';
+  if (creatorLink) {
+    creatorLink.textContent = creatorName;
+    creatorLink.href = meeting.creator?.id ? `profile.html?id=${meeting.creator.id}` : '#';
   }
 
-  document.getElementById('creator-age').textContent = creatorAge;
+  const ageEl = document.getElementById('creator-age');
+  if (ageEl) ageEl.textContent = creatorAge;
+
   const currentSlots = meeting.current_slots || meeting.participants_count || 0;
-  document.getElementById('participants-info').textContent = `👥 ${currentSlots}/${meeting.max_slots || 0} участников`;
+  const infoEl = document.getElementById('participants-info');
+  if (infoEl) infoEl.textContent = `👥 ${currentSlots}/${meeting.max_slots || 0} участников`;
 }
 
 async function fetchMeeting(meetingId) {
-  if (!supabaseClient || !meetingId) return null;
+  if (!meetingId) return null;
   try {
-    const { data: meeting, error } = await supabaseClient
-      .from(TABLES.meetings)
-      .select('*')
-      .eq('id', meetingId)
-      .single();
-
-    if (error) throw error;
+    const meeting = await api.getOne(TABLES.meetings, meetingId);
     if (!meeting) return null;
 
     if (meeting.creator_id) {
-      const { data: creator } = await supabaseClient
-        .from(TABLES.profiles)
-        .select('id, username, full_name, age, photo_URL')
-        .eq('id', meeting.creator_id)
-        .single();
-      return { ...meeting, creator };
+      const creator = await api.getOne(TABLES.profiles, meeting.creator_id);
+      return { ...meeting, creator: creator ? pickCreatorFields(creator) : null };
     }
-
     return meeting;
   } catch (error) {
     console.error('Ошибка загрузки встречи:', error);
     return null;
   }
+}
+
+function pickCreatorFields(profile) {
+  if (!profile) return null;
+  return {
+    id: profile.id,
+    username: profile.username,
+    full_name: profile.full_name,
+    age: profile.age,
+    photo_URL: profile.photo_URL
+  };
 }
 
 async function setupChatState(meeting, user) {
@@ -121,12 +135,8 @@ async function setupChatState(meeting, user) {
     return;
   }
 
-  const { data: membership } = await supabaseClient
-    .from(TABLES.chat_members)
-    .select('id, role, status')
-    .eq('chat_id', meeting.chat_id)
-    .eq('user_id', user.id)
-    .maybeSingle();
+  const memberships = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
+  const membership = (memberships || [])[0] || null;
 
   if (statusCard && statusText) {
     statusCard.style.display = 'block';
@@ -141,15 +151,11 @@ async function setupChatState(meeting, user) {
       if (joinButton) joinButton.style.display = 'none';
       if (openBtn) {
         openBtn.style.display = 'block';
-        openBtn.onclick = () => {
-          window.location.href = `chat.html?chat_id=${meeting.chat_id}`;
-        };
+        openBtn.onclick = () => { window.location.href = `chat.html?chat_id=${meeting.chat_id}`; };
       }
       if (leaveBtn && meeting.creator_id !== user.id) {
         leaveBtn.style.display = 'block';
-        leaveBtn.onclick = async () => {
-          await leaveChat(meeting, user);
-        };
+        leaveBtn.onclick = async () => { await leaveChat(meeting, user); };
       } else if (leaveBtn) {
         leaveBtn.style.display = 'none';
       }
@@ -160,47 +166,38 @@ async function setupChatState(meeting, user) {
   }
 
   if (meeting.creator_id && meeting.creator_id === user.id) {
-    const { data: pending } = await supabaseClient
-      .from(TABLES.chat_members)
-      .select('id, user_id, status')
-      .eq('chat_id', meeting.chat_id)
-      .eq('status', 'pending');
+    const pending = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, status: 'pending' });
 
     if (requestsCard && requestsList) {
       requestsCard.style.display = 'block';
       requestsList.innerHTML = '';
+
       if (!pending || pending.length === 0) {
         requestsList.textContent = 'Нет заявок';
-      } else {
-        const userIds = pending.map(req => req.user_id).filter(Boolean);
-        const { data: profiles } = await supabaseClient
-          .from(TABLES.profiles)
-          .select('id, full_name, username, age')
-          .in('id', userIds);
-        const byId = new Map((profiles || []).map(p => [p.id, p]));
-
-        pending.forEach(req => {
-          const profile = byId.get(req.user_id);
-          const name = profile?.full_name || profile?.username || req.user_id;
-          const age = profile?.age ? `, ${profile.age}` : '';
-          const row = document.createElement('div');
-          row.className = 'request-item';
-          row.innerHTML = `
-            <div><a href="profile.html?id=${req.user_id}">${name}${age}</a></div>
-            <div class="request-actions">
-              <button class="btn-approve">Одобрить</button>
-              <button class="btn-reject">Отклонить</button>
-            </div>
-          `;
-          row.querySelector('.btn-approve').onclick = async () => {
-            await approveRequest(meeting, req.user_id);
-          };
-          row.querySelector('.btn-reject').onclick = async () => {
-            await rejectRequest(meeting, req.user_id);
-          };
-          requestsList.appendChild(row);
-        });
+        return;
       }
+
+      const userIds = pending.map(req => req.user_id).filter(Boolean);
+      const profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
+      const byId = new Map((profiles || []).map(p => [p.id, p]));
+
+      pending.forEach(req => {
+        const profile = byId.get(req.user_id);
+        const name = profile?.full_name || profile?.username || req.user_id;
+        const age = profile?.age ? `, ${profile.age}` : '';
+        const row = document.createElement('div');
+        row.className = 'request-item';
+        row.innerHTML = `
+          <div><a href="profile.html?id=${req.user_id}">${name}${age}</a></div>
+          <div class="request-actions">
+            <button class="btn-approve">Одобрить</button>
+            <button class="btn-reject">Отклонить</button>
+          </div>
+        `;
+        row.querySelector('.btn-approve').onclick = async () => { await approveRequest(meeting, req.user_id); };
+        row.querySelector('.btn-reject').onclick = async () => { await rejectRequest(meeting, req.user_id); };
+        requestsList.appendChild(row);
+      });
     }
   }
 }
@@ -216,101 +213,84 @@ async function requestJoin(meeting, user) {
     return;
   }
 
-  const { data: existing } = await supabaseClient
-    .from(TABLES.chat_members)
-    .select('id, status')
-    .eq('chat_id', meeting.chat_id)
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  if (existing) {
-    showNotification(existing.status === 'pending' ? 'Заявка уже отправлена' : 'Вы уже в чате');
+  const existing = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
+  if (existing && existing[0]) {
+    showNotification(existing[0].status === 'pending' ? 'Заявка уже отправлена' : 'Вы уже в чате');
     return;
   }
 
-  const { error } = await supabaseClient
-    .from(TABLES.chat_members)
-    .insert([{ chat_id: meeting.chat_id, user_id: user.id, role: 'member', status: 'pending' }]);
-
-  if (error) {
-    if (error.code === '23505' || error.status === 409) {
-      showNotification('Заявка уже отправлена');
-      const { data: { user: freshUser } } = await supabaseClient.auth.getUser();
-      await setupChatState(meeting, freshUser || user);
-      return;
-    }
+  try {
+    await api.insert(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id, role: 'member', status: 'pending' });
+    showNotification('Заявка отправлена');
+    const freshUser = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
+    await setupChatState(meeting, freshUser || user);
+  } catch (e) {
+    console.error('Ошибка отправки заявки:', e);
     showNotification('Ошибка отправки заявки');
-    return;
   }
-  showNotification('Заявка отправлена');
-  const { data: { user: freshUser } } = await supabaseClient.auth.getUser();
-  await setupChatState(meeting, freshUser || user);
 }
 
 async function approveRequest(meeting, userId) {
-  const { error } = await supabaseClient
-    .from(TABLES.chat_members)
-    .update({ status: 'approved' })
-    .eq('chat_id', meeting.chat_id)
-    .eq('user_id', userId);
+  try {
+    const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: userId });
+    const membership = (rows || [])[0];
+    if (!membership?.id) {
+      showNotification('Не удалось найти заявку');
+      return;
+    }
+    await api.update(TABLES.chat_members, membership.id, { status: 'approved' });
 
-  if (error) {
+    const currentSlots = meeting.current_slots || 0;
+    await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
+    meeting.current_slots = currentSlots + 1;
+
+    showNotification('Пользователь добавлен');
+    await setupChatState(meeting, { id: meeting.creator_id });
+  } catch (e) {
+    console.error('Ошибка одобрения:', e);
     showNotification('Ошибка одобрения');
-    return;
   }
-
-  await supabaseClient
-    .from(TABLES.meetings)
-    .update({ current_slots: (meeting.current_slots || 0) + 1 })
-    .eq('id', meeting.id);
-
-  showNotification('Пользователь добавлен');
-  await setupChatState(meeting, { id: meeting.creator_id });
 }
 
 async function rejectRequest(meeting, userId) {
-  const { error } = await supabaseClient
-    .from(TABLES.chat_members)
-    .update({ status: 'rejected' })
-    .eq('chat_id', meeting.chat_id)
-    .eq('user_id', userId);
-
-  if (error) {
+  try {
+    const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: userId });
+    const membership = (rows || [])[0];
+    if (!membership?.id) {
+      showNotification('Не удалось найти заявку');
+      return;
+    }
+    await api.update(TABLES.chat_members, membership.id, { status: 'rejected' });
+    showNotification('Заявка отклонена');
+    await setupChatState(meeting, { id: meeting.creator_id });
+  } catch (e) {
+    console.error('Ошибка отклонения:', e);
     showNotification('Ошибка отклонения');
-    return;
   }
-  showNotification('Заявка отклонена');
-  await setupChatState(meeting, { id: meeting.creator_id });
 }
 
 async function leaveChat(meeting, user) {
   const confirmLeave = confirm('Покинуть чат встречи?');
   if (!confirmLeave) return;
-  const { error } = await supabaseClient
-    .from(TABLES.chat_members)
-    .delete()
-    .eq('chat_id', meeting.chat_id)
-    .eq('user_id', user.id);
-
-  if (error) {
+  try {
+    await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: user.id });
+    const currentSlots = meeting.current_slots || 1;
+    const nextSlots = Math.max(currentSlots - 1, 0);
+    await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
+    meeting.current_slots = nextSlots;
+    showNotification('Вы вышли из чата');
+    await setupChatState(meeting, user);
+  } catch (e) {
+    console.error('Ошибка выхода:', e);
     showNotification('Ошибка выхода');
-    return;
   }
-
-  await supabaseClient
-    .from(TABLES.meetings)
-    .update({ current_slots: Math.max((meeting.current_slots || 1) - 1, 0) })
-    .eq('id', meeting.id);
-
-  showNotification('Вы вышли из чата');
-  await setupChatState(meeting, user);
 }
 
 function showNotification(message) {
   const notification = document.getElementById('notification');
+  if (!notification) return;
   notification.textContent = message;
   notification.style.display = 'block';
-  setTimeout(() => {
-    notification.style.display = 'none';
-  }, 3000);
+  setTimeout(() => { notification.style.display = 'none'; }, 3000);
 }
+

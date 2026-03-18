@@ -1,52 +1,48 @@
-// Quick verification script for Supabase migration issues
-// Copy and paste into browser console (F12)
+// Quick verification script for API migration
+// Copy and paste into browser console (F12) on any page that loads `js/api.js`.
 
-console.group('🔍 Supabase Chat Diagnostics');
+console.group('API Diagnostics');
 
-// Test 1: Auth session
-(async () => {
-  const result = await window.APP.supabase.auth.getSession();
-  console.log('✓ Session valid:', !!result.data?.session);
-})();
-
-// Test 2: Supabase client
-console.log('✓ Supabase client:', typeof window.APP.supabase);
-
-// Test 3: Table configs
-console.log('✓ TABLES config:', window.APP.TABLES);
-
-// Test 4: Current user
-console.log('✓ currentUser:', typeof currentUser !== 'undefined' ? currentUser?.id : 'NOT DEFINED');
-
-// Test 5: Quick data checks
 (async () => {
   try {
-    const chats = await window.APP.supabase
-      .from('chats')
-      .select('count(*)', { count: 'exact' });
-    console.log('✓ Chats table:', chats.error ? '❌ ERROR: ' + chats.error.message : '✓ Accessible');
-    
-    const members = await window.APP.supabase
-      .from('chat_members')
-      .select('count(*)', { count: 'exact' });
-    console.log('✓ Chat members table:', members.error ? '❌ ERROR: ' + members.error.message : '✓ Accessible');
-    
-    const profiles = await window.APP.supabase
-      .from('profiles')
-      .select('count(*)', { count: 'exact' });
-    console.log('✓ Profiles table:', profiles.error ? '❌ ERROR: ' + profiles.error.message : '✓ Accessible');
+    const health = await fetch('/api/health').then(r => r.json());
+    console.log('✓ /api/health:', health);
   } catch (e) {
-    console.error('❌ Test error:', e.message);
+    console.error('✗ /api/health failed:', e.message || e);
+  }
+
+  try {
+    console.log('✓ api global:', typeof api);
+  } catch (_e) {
+    console.error('✗ api is not defined (check <script src=\"js/api.js\"> order)');
+  }
+
+  try {
+    const me = await api.request('/api/auth/me', { method: 'GET' });
+    console.log('✓ /api/auth/me:', me ? { id: me.id, email: me.email, role: me.role } : null);
+  } catch (e) {
+    console.error('✗ /api/auth/me failed:', e.message || e);
+  }
+
+  try {
+    const tables = window.APP && window.APP.TABLES ? window.APP.TABLES : null;
+    console.log('✓ TABLES config:', tables);
+  } catch (_e) {}
+
+  try {
+    const profilesCount = await api.query('profiles', 'count', {}, {});
+    console.log('✓ profiles count:', profilesCount);
+  } catch (e) {
+    console.error('✗ profiles count failed:', e.message || e);
+  }
+
+  try {
+    const meetingsCount = await api.query('meetings', 'count', {}, {});
+    console.log('✓ meetings count:', meetingsCount);
+  } catch (e) {
+    console.error('✗ meetings count failed:', e.message || e);
   }
 })();
 
-// Test 6: Load chats manually
-console.log('--- Manual Chat Load Test ---');
-if (typeof loadChats === 'function') {
-  console.log('✓ loadChats function exists');
-  // await loadChats(); // Uncomment to trigger actual load
-} else {
-  console.warn('⚠️ loadChats function not found');
-}
-
 console.groupEnd();
+

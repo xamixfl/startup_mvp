@@ -1,13 +1,18 @@
-﻿// Topics will be fetched from database
+// Topics will be fetched from database
 let TOPICS = [];
 let currentUser = null;
 let viewedProfile = null;
-let isCurrentUserBanned = false;
+let isCurrentUserAdmin = false;
+
+const DEFAULT_AVATAR = 'assets/avatar.png';
 
 document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
-  const { data: { user } } = await window.APP.supabase.auth.getUser();
-  currentUser = user || null;
+  currentUser = typeof window.getCurrentUser === 'function'
+    ? await window.getCurrentUser()
+    : await api.request('/api/auth/me');
+  isCurrentUserAdmin = currentUser?.role === 'admin';
+
   const params = new URLSearchParams(window.location.search);
   const id = params.get('id');
   const name = params.get('name');
@@ -31,48 +36,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupBanButton();
 });
 
-const DEFAULT_AVATAR = 'assets/avatar.png';
-
 function getLocalMeetings() {
   const raw = localStorage.getItem('pulse_meetings');
   if (!raw) return [];
   try {
     const list = JSON.parse(raw);
     return Array.isArray(list) ? list : [];
-  } catch (error) {
+  } catch (_e) {
     return [];
   }
 }
 
 async function fetchProfile(id, name) {
-  const supabaseClient = window.APP?.supabase;
-  if (!supabaseClient) return null;
-
   try {
-    if (id) {
-      const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      return data;
-    }
-
+    if (id) return await api.getOne('profiles', id);
     if (name) {
-      const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('*')
-        .eq('username', name)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
+      const rows = await api.get('profiles', { username: name, $limit: 1 });
+      return (rows || [])[0] || null;
     }
   } catch (error) {
     console.error('Ошибка загрузки профиля:', error);
-    return null;
   }
-
   return null;
 }
 
@@ -82,25 +66,32 @@ function renderProfile(profile) {
   const avatarUrl = profile.photo_URL && profile.photo_URL !== 'user'
     ? profile.photo_URL
     : DEFAULT_AVATAR;
-  avatar.innerHTML = `<img src="${avatarUrl}" alt="${displayName}">`;
 
-  document.getElementById('profile-name').textContent = displayName;
-  document.getElementById('profile-meta').textContent = profile.age ? `${profile.age} лет` : 'Возраст не указан';
-  document.getElementById('profile-city').textContent = profile.location || 'Город не указан';
-  document.getElementById('profile-about').textContent = profile.about || profile.bio || profile.description || 'О себе: —';
-
-  const modal = document.getElementById('avatar-modal');
-  const modalImg = document.getElementById('avatar-modal-img');
-  avatar.onclick = () => {
-    if (!modal || !modalImg) return;
-    modalImg.src = avatarUrl;
-    modal.style.display = 'flex';
-  };
-  if (modal) {
-    modal.onclick = () => {
-      modal.style.display = 'none';
+  if (avatar) {
+    avatar.innerHTML = `<img src="${avatarUrl}" alt="${displayName}">`;
+    const modal = document.getElementById('avatar-modal');
+    const modalImg = document.getElementById('avatar-modal-img');
+    avatar.onclick = () => {
+      if (!modal || !modalImg) return;
+      modalImg.src = avatarUrl;
+      modal.style.display = 'flex';
     };
+    if (modal) {
+      modal.onclick = () => { modal.style.display = 'none'; };
+    }
   }
+
+  const nameEl = document.getElementById('profile-name');
+  if (nameEl) nameEl.textContent = displayName;
+
+  const metaEl = document.getElementById('profile-meta');
+  if (metaEl) metaEl.textContent = profile.age ? `${profile.age} лет` : 'Возраст не указан';
+
+  const cityEl = document.getElementById('profile-city');
+  if (cityEl) cityEl.textContent = profile.location || 'Город не указан';
+
+  const aboutEl = document.getElementById('profile-about');
+  if (aboutEl) aboutEl.textContent = profile.about || profile.bio || profile.description || 'О себе: —';
 
   const messageBtn = document.getElementById('message-btn');
   if (messageBtn) {
@@ -113,14 +104,16 @@ function renderProfile(profile) {
   }
 
   const interestsWrap = document.getElementById('profile-interests');
-  interestsWrap.innerHTML = '';
-  (profile.interests || []).forEach(id => {
-    const topic = TOPICS.find(item => item.id === id);
-    const pill = document.createElement('div');
-    pill.className = 'interest-pill';
-    pill.textContent = topic ? topic.name : normalizeInterestLabel(id);
-    interestsWrap.appendChild(pill);
-  });
+  if (interestsWrap) {
+    interestsWrap.innerHTML = '';
+    (profile.interests || []).forEach(topicId => {
+      const topic = TOPICS.find(item => item.id === topicId);
+      const pill = document.createElement('div');
+      pill.className = 'interest-pill';
+      pill.textContent = topic ? topic.name : normalizeInterestLabel(topicId);
+      interestsWrap.appendChild(pill);
+    });
+  }
 }
 
 async function createDirectChat(profile) {
@@ -128,30 +121,23 @@ async function createDirectChat(profile) {
     window.location.href = 'login.html';
     return;
   }
-  const { TABLES } = window.APP;
+  const { TABLES } = window.APP || {};
+
   try {
-    const { data: myMemberships } = await window.APP.supabase
-      .from(TABLES.chat_members)
-      .select('chat_id')
-      .eq('user_id', currentUser.id)
-      .eq('status', 'approved');
+    // Find existing direct chat (no meeting_id) between two users
+    const myMemberships = await api.get(TABLES.chat_members, { user_id: currentUser.id, status: 'approved' });
+    const myChatIds = (myMemberships || []).map(m => m.chat_id).filter(Boolean);
 
-    const myChatIds = (myMemberships || []).map(m => m.chat_id);
     if (myChatIds.length > 0) {
-      const { data: otherMemberships } = await window.APP.supabase
-        .from(TABLES.chat_members)
-        .select('chat_id')
-        .eq('user_id', profile.id)
-        .eq('status', 'approved')
-        .in('chat_id', myChatIds);
-
-      const commonChatIds = (otherMemberships || []).map(m => m.chat_id);
+      const otherMemberships = await api.get(TABLES.chat_members, {
+        user_id: profile.id,
+        status: 'approved',
+        chat_id: { in: myChatIds }
+      });
+      const commonChatIds = (otherMemberships || []).map(m => m.chat_id).filter(Boolean);
       if (commonChatIds.length > 0) {
-        const { data: existingChats } = await window.APP.supabase
-          .from(TABLES.chats)
-          .select('id, meeting_id')
-          .in('id', commonChatIds);
-        const direct = (existingChats || []).find(c => !c.meeting_id);
+        const chats = await api.get(TABLES.chats, { id: { in: commonChatIds } });
+        const direct = (chats || []).find(c => !c.meeting_id);
         if (direct) {
           window.location.href = `chat.html?chat_id=${direct.id}`;
           return;
@@ -160,43 +146,22 @@ async function createDirectChat(profile) {
     }
 
     const title = profile.full_name || profile.username || 'Чат';
-    const { data: chat, error: chatError } = await window.APP.supabase
-      .from(TABLES.chats)
-      .insert([{
-        meeting_id: null,
-        title,
-        owner_id: currentUser.id,
-        peer_id: profile.id
-      }])
-      .select()
-      .single();
-    if (chatError) throw chatError;
+    const inserted = await api.insert(TABLES.chats, {
+      meeting_id: null,
+      title,
+      owner_id: currentUser.id,
+      peer_id: profile.id
+    });
+    const chat = Array.isArray(inserted) ? inserted[0] : null;
+    if (!chat?.id) throw new Error('Chat not created');
 
-    const { error: ownerInsertError } = await window.APP.supabase
-      .from(TABLES.chat_members)
-      .insert([
-        { chat_id: chat.id, user_id: currentUser.id, role: 'owner', status: 'approved' }
-      ]);
-    if (ownerInsertError) {
-      await window.APP.supabase.from(TABLES.chats).delete().eq('id', chat.id);
-      throw ownerInsertError;
-    }
-
-    const { error: peerInsertError } = await window.APP.supabase
-      .from(TABLES.chat_members)
-      .insert([
-        { chat_id: chat.id, user_id: profile.id, role: 'member', status: 'approved' }
-      ]);
-    if (peerInsertError) {
-      await window.APP.supabase.from(TABLES.chat_members).delete().eq('chat_id', chat.id);
-      await window.APP.supabase.from(TABLES.chats).delete().eq('id', chat.id);
-      throw peerInsertError;
-    }
+    await api.insert(TABLES.chat_members, { chat_id: chat.id, user_id: currentUser.id, role: 'owner', status: 'approved' });
+    await api.insert(TABLES.chat_members, { chat_id: chat.id, user_id: profile.id, role: 'member', status: 'approved' });
 
     window.location.href = `chat.html?chat_id=${chat.id}`;
   } catch (error) {
     console.error('Ошибка создания личного чата:', error);
-    alert('Не удалось создать личный чат. Проверьте RLS политики.');
+    alert('Не удалось создать личный чат.');
   }
 }
 
@@ -213,90 +178,54 @@ function normalizeInterestLabel(id) {
     music: '🎵 Музыка',
     photography: '📷 Фотография'
   };
-
-  if (fallbackMap[id]) return fallbackMap[id];
-  return id;
+  return fallbackMap[id] || id;
 }
 
 function renderMeetings(profile) {
   const list = document.getElementById('meeting-list');
+  if (!list) return;
   list.innerHTML = '';
 
-  // If viewing own profile, show both created and joined meetings
   if (currentUser && currentUser.id === profile.id) {
     fetchUserMeetings(profile, list);
   } else {
-    // If viewing others profile, show only their created meetings
     fetchMeetingsForProfile(profile, list);
   }
 }
 
 function renderEmptyProfile() {
-  document.getElementById('profile-name').textContent = 'Профиль не найден';
-  document.getElementById('profile-meta').textContent = '';
-  document.getElementById('profile-city').textContent = '';
-  document.getElementById('profile-interests').innerHTML = '';
+  const nameEl = document.getElementById('profile-name');
+  if (nameEl) nameEl.textContent = 'Профиль не найден';
+  const metaEl = document.getElementById('profile-meta');
+  if (metaEl) metaEl.textContent = '';
+  const cityEl = document.getElementById('profile-city');
+  if (cityEl) cityEl.textContent = '';
+  const interests = document.getElementById('profile-interests');
+  if (interests) interests.innerHTML = '';
   const list = document.getElementById('meeting-list');
-  list.innerHTML = '';
-  const empty = document.createElement('div');
-  empty.style.color = '#94a3b8';
-  empty.textContent = 'Нет данных профиля';
-  list.appendChild(empty);
+  if (list) {
+    list.innerHTML = '';
+    renderMeetingsEmpty(list);
+  }
 }
 
 async function fetchUserMeetings(profile, list) {
-  const supabaseClient = window.APP?.supabase;
-  if (!supabaseClient || !profile?.id) {
-    renderMeetingsEmpty(list);
-    return;
-  }
-
   try {
-    const { TABLES } = window.APP;
+    const { TABLES } = window.APP || {};
+    const created = await api.get(TABLES.meetings, {
+      creator_id: profile.id,
+      $order: { column: 'created_at', ascending: false }
+    });
 
-    // First, clean up meetings with 0 current_slots
-    await supabaseClient
-      .from('meetings')
-      .delete()
-      .eq('current_slots', 0);
-
-    // Fetch created meetings
-    const { data: createdData, error: createdError } = await supabaseClient
-      .from('meetings')
-      .select('id, title, topic, location, max_slots, current_slots, creator_id')
-      .eq('creator_id', profile.id)
-      .order('created_at', { ascending: false });
-
-    if (createdError) throw createdError;
-
-    // Fetch joined meetings
-    const { data: participantData, error: participantError } = await supabaseClient
-      .from(TABLES.participants)
-      .select('meeting_id')
-      .eq('user_id', profile.id);
-
-    if (participantError) throw participantError;
-
-    const joinedMeetingIds = (participantData || []).map(p => p.meeting_id);
-    let joinedData = [];
-
-    if (joinedMeetingIds.length > 0) {
-      const { data: meetings, error: meetingsError } = await supabaseClient
-        .from('meetings')
-        .select('id, title, topic, location, max_slots, current_slots, creator_id')
-        .in('id', joinedMeetingIds)
-        .order('created_at', { ascending: false });
-
-      if (!meetingsError && meetings) {
-        joinedData = meetings;
-      }
+    const memberships = await api.get(TABLES.participants, { user_id: profile.id });
+    const meetingIds = Array.from(new Set((memberships || []).map(m => m.meeting_id).filter(Boolean)));
+    let joined = [];
+    if (meetingIds.length) {
+      joined = await api.get(TABLES.meetings, { id: { in: meetingIds } });
     }
 
-    // Combine and remove duplicates
-    const allMeetings = [...(createdData || []), ...(joinedData || [])];
-    const uniqueMeetings = Array.from(
-      new Map(allMeetings.map(m => [m.id, m])).values()
-    ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const merged = [...(created || []), ...(joined || [])];
+    const uniqueMeetings = Array.from(new Map(merged.map(m => [m.id, m])).values());
 
     if (uniqueMeetings.length === 0) {
       renderMeetingsEmpty(list);
@@ -310,21 +239,31 @@ async function fetchUserMeetings(profile, list) {
   }
 }
 
-function renderMeetingsList(meetings, list) {
-  console.log('Rendering meetings:', meetings.length);
-  console.log('Current user:', currentUser?.id);
-  console.log('Viewed profile:', viewedProfile?.id);
+async function fetchMeetingsForProfile(profile, list) {
+  try {
+    const data = await api.get('meetings', {
+      creator_id: profile.id,
+      $order: { column: 'created_at', ascending: false }
+    });
+    if (!data || data.length === 0) {
+      renderMeetingsEmpty(list);
+      return;
+    }
+    renderMeetingsList(data, list);
+  } catch (error) {
+    console.error('Ошибка загрузки встреч профиля:', error);
+    renderMeetingsEmpty(list);
+  }
+}
 
+function renderMeetingsList(meetings, list) {
   meetings.forEach(meeting => {
     const topic = TOPICS.find(item => item.id === meeting.topic) || TOPICS[TOPICS.length - 1];
     const item = document.createElement('div');
     item.className = 'meeting-item';
 
-    // Show menu button when viewing own profile
     const showMenu = currentUser && currentUser.id === viewedProfile?.id;
     const isCreator = currentUser && currentUser.id === meeting.creator_id;
-
-    console.log(`Meeting ${meeting.id}: showMenu=${showMenu}, isCreator=${isCreator}`);
 
     const menuItems = isCreator
       ? `<button class="meeting-menu-item" onclick="window.editMeeting('${meeting.id}')">✏️ Редактировать</button>
@@ -336,7 +275,7 @@ function renderMeetingsList(meetings, list) {
     item.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div style="flex: 1;">
-          <div class="meeting-tag">#${topic.name.replace(/^(\S+)\s/, '')}</div>
+          <div class="meeting-tag">#${(topic?.name || 'Встреча').replace(/^(\S+)\s/, '')}</div>
           <div class="meeting-headline">${meeting.title || 'Без названия'}</div>
           <div class="meeting-info">
             <span>👥 ${meeting.current_slots || 0}/${meeting.max_slots || 0}</span>
@@ -351,7 +290,6 @@ function renderMeetingsList(meetings, list) {
     `;
 
     item.onclick = (e) => {
-      // Don't navigate if clicking menu button or menu
       if (e.target.closest('.meeting-menu-btn') || e.target.closest('.meeting-menu')) {
         e.stopPropagation();
         return;
@@ -359,7 +297,6 @@ function renderMeetingsList(meetings, list) {
       window.location.href = `meeting.html?id=${meeting.id}`;
     };
 
-    // Setup menu button
     const menuBtn = item.querySelector('.meeting-menu-btn');
     if (menuBtn) {
       menuBtn.onclick = (e) => {
@@ -373,264 +310,99 @@ function renderMeetingsList(meetings, list) {
 }
 
 function toggleMeetingMenu(meetingId, itemElement) {
-  console.log('Toggling menu for meeting:', meetingId);
   const menu = itemElement.querySelector(`[data-meeting-id="${meetingId}"].meeting-menu`);
-  if (!menu) {
-    console.error('Menu not found for meeting:', meetingId);
-    return;
-  }
-
-  // Close other menus
+  if (!menu) return;
   document.querySelectorAll('.meeting-menu.open').forEach(m => {
     if (m !== menu) m.classList.remove('open');
   });
-
   menu.classList.toggle('open');
-  console.log('Menu is now:', menu.classList.contains('open') ? 'open' : 'closed');
 }
 
-async function fetchMeetingsForProfile(profile, list) {
-  const supabaseClient = window.APP?.supabase;
-  if (!supabaseClient || !profile?.id) {
-    renderMeetingsEmpty(list);
-    return;
-  }
+window.editMeeting = function (meetingId) {
+  window.location.href = `create-meeting.html?edit=${meetingId}`;
+};
 
+window.shareMeeting = async function (meetingId) {
+  const url = `${window.location.origin}${window.location.pathname.replace(/profile\\.html.*$/i, 'meeting.html')}?id=${meetingId}`;
   try {
-    const { data, error } = await supabaseClient
-      .from('meetings')
-      .select('id, title, topic, location, max_slots, current_slots, creator_id')
-      .eq('creator_id', profile.id)
-      .order('created_at', { ascending: false });
-
-    if (error || !data || data.length === 0) {
-      renderMeetingsEmpty(list);
-      return;
-    }
-
-    renderMeetingsList(data, list);
-  } catch (error) {
-    console.error('Ошибка загрузки встреч профиля:', error);
-    renderMeetingsEmpty(list);
+    await navigator.clipboard.writeText(url);
+    alert('Ссылка скопирована');
+  } catch (_e) {
+    prompt('Скопируйте ссылку:', url);
   }
-}
+};
 
 window.leaveMeeting = async function (meetingId) {
   if (!currentUser) {
     alert('Вы должны быть авторизованы');
     return;
   }
-
-  if (!confirm('Вы действительно хотите покинуть эту встречу?')) {
-    return;
-  }
+  if (!confirm('Вы действительно хотите покинуть эту встречу?')) return;
 
   try {
-    const supabaseClient = window.APP.supabase;
-    const { TABLES } = window.APP;
-
-    // Check if user is participant
-    const { data: participant, error: partError } = await supabaseClient
-      .from(TABLES.participants)
-      .select('id')
-      .eq('meeting_id', meetingId)
-      .eq('user_id', currentUser.id)
-      .single();
-
-    if (partError || !participant) {
+    const { TABLES } = window.APP || {};
+    const participants = await api.get(TABLES.participants, { meeting_id: meetingId, user_id: currentUser.id });
+    if (!participants || participants.length === 0) {
       alert('Вы не участник этой встречи');
       return;
     }
+    await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId, user_id: currentUser.id });
 
-    // Delete participant
-    const { error: deleteError } = await supabaseClient
-      .from(TABLES.participants)
-      .delete()
-      .eq('meeting_id', meetingId)
-      .eq('user_id', currentUser.id);
-
-    if (deleteError) throw deleteError;
-
-    // Decrease meeting current_slots
-    const { data: meeting, error: fetchError } = await supabaseClient
-      .from('meetings')
-      .select('current_slots')
-      .eq('id', meetingId)
-      .single();
-
-    if (!fetchError && meeting) {
-      const newSlots = Math.max(0, meeting.current_slots - 1);
-      await supabaseClient
-        .from('meetings')
-        .update({ current_slots: newSlots })
-        .eq('id', meetingId);
-
-      // If no users left, delete the meeting
-      if (newSlots === 0) {
-        await supabaseClient
-          .from('meetings')
-          .delete()
-          .eq('id', meetingId);
+    const meeting = await api.getOne(TABLES.meetings, meetingId);
+    if (meeting) {
+      await api.update(TABLES.meetings, meetingId, { current_slots: Math.max((meeting.current_slots || 1) - 1, 0) });
+      if (meeting.chat_id) {
+        await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: currentUser.id });
       }
     }
 
-    alert('✅ Вы покинули встречу');
-    // Reload profile
+    alert('Вы покинули встречу');
     location.reload();
   } catch (error) {
-    console.error('Ошибка при выходе из встречи:', error);
-    alert('❌ Ошибка: ' + error.message);
-  }
-};
-
-window.editMeeting = function (meetingId) {
-  if (!currentUser) {
-    alert('Вы должны быть авторизованы');
-    return;
-  }
-
-  // Redirect to create-meeting page with edit parameter
-  window.location.href = `create-meeting.html?edit=${meetingId}`;
-};
-
-window.shareMeeting = async function (meetingId) {
-  try {
-    const meetingUrl = `${window.location.origin}/meeting.html?id=${meetingId}`;
-
-    // Try native share API
-    if (navigator.share) {
-      await navigator.share({
-        title: 'pulse - встреча',
-        text: 'Приглашаю вас к встрече!',
-        url: meetingUrl
-      });
-    } else {
-      // Fallback: copy to clipboard
-      await navigator.clipboard.writeText(meetingUrl);
-      alert('✅ Ссылка скопирована в буфер обмена!');
-    }
-  } catch (error) {
-    console.error('Ошибка при общей ссылке:', error);
+    console.error('Ошибка покидания встречи:', error);
+    alert('Ошибка: ' + (error.message || String(error)));
   }
 };
 
 window.deleteMeeting = async function (meetingId) {
-  console.log('deleteMeeting called with ID:', meetingId);
-
   if (!currentUser) {
     alert('Вы должны быть авторизованы');
     return;
   }
-
-  if (!confirm('Вы уверены, что хотите удалить эту встречу?')) {
-    console.log('User cancelled deletion');
-    return;
-  }
+  if (!confirm('Удалить встречу?')) return;
 
   try {
-    const supabaseClient = window.APP.supabase;
-    const { TABLES } = window.APP;
-
-    console.log('Fetching meeting:', meetingId);
-
-    // First verify this is the creator
-    const { data: meeting, error: fetchError } = await supabaseClient
-      .from('meetings')
-      .select('creator_id, chat_id')
-      .eq('id', meetingId)
-      .single();
-
-    if (fetchError || !meeting) {
-      alert('❌ Встреча не найдена');
-      console.error('Fetch error:', fetchError);
+    const { TABLES } = window.APP || {};
+    const meeting = await api.getOne(TABLES.meetings, meetingId);
+    if (!meeting) {
+      alert('Встреча не найдена');
       return;
     }
-
-    console.log('Meeting found:', meeting);
-
     if (meeting.creator_id !== currentUser.id) {
-      alert('❌ Вы не являетесь создателем этой встречи');
+      alert('Вы не являетесь создателем этой встречи');
       return;
     }
 
-    // Delete chat members if chat exists
     if (meeting.chat_id) {
-      console.log('Deleting chat members for chat:', meeting.chat_id);
-      const { error: chatMembersError } = await supabaseClient
-        .from(TABLES.chat_members)
-        .delete()
-        .eq('chat_id', meeting.chat_id);
-
-      if (chatMembersError) {
-        console.error('Error deleting chat members:', chatMembersError);
-      }
-
-      // Delete chat messages
-      console.log('Deleting chat messages for chat:', meeting.chat_id);
-      const { error: chatMessagesError } = await supabaseClient
-        .from(TABLES.chat_messages)
-        .delete()
-        .eq('chat_id', meeting.chat_id);
-
-      if (chatMessagesError) {
-        console.error('Error deleting chat messages:', chatMessagesError);
-      }
-
-      // Delete chat
-      console.log('Deleting chat:', meeting.chat_id);
-      const { error: chatError } = await supabaseClient
-        .from(TABLES.chats)
-        .delete()
-        .eq('id', meeting.chat_id);
-
-      if (chatError) {
-        console.error('Error deleting chat:', chatError);
-      }
+      await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id });
+      await api.query(TABLES.chat_messages, 'deleteWhere', {}, { chat_id: meeting.chat_id });
+      await api.delete(TABLES.chats, meeting.chat_id);
     }
 
-    // Delete all participants
-    console.log('Deleting participants for meeting:', meetingId);
-    const { error: partError } = await supabaseClient
-      .from(TABLES.participants)
-      .delete()
-      .eq('meeting_id', meetingId);
+    await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });
+    await api.delete(TABLES.meetings, meetingId);
 
-    if (partError) {
-      console.error('Ошибка удаления участников:', partError);
-      // Continue even if participants deletion fails (might not exist)
-    }
-
-    // Delete the meeting
-    console.log('Deleting meeting:', meetingId);
-    const { error: deleteError } = await supabaseClient
-      .from('meetings')
-      .delete()
-      .eq('id', meetingId)
-      .eq('creator_id', currentUser.id);
-
-    if (deleteError) {
-      console.error('Ошибка удаления встречи:', deleteError);
-      alert('❌ Ошибка удаления встречи: ' + deleteError.message);
-      return;
-    }
-
-    console.log('Meeting deleted successfully');
-    alert('✅ Встреча удалена');
-
-    // Reload profile
+    alert('Встреча удалена');
     location.reload();
   } catch (error) {
     console.error('Ошибка при удалении встречи:', error);
-    alert('❌ Ошибка: ' + error.message);
+    alert('Ошибка: ' + (error.message || String(error)));
   }
 };
 
-// Close menus when clicking outside
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.meeting-item')) {
-    document.querySelectorAll('.meeting-menu.open').forEach(menu => {
-      menu.classList.remove('open');
-    });
+    document.querySelectorAll('.meeting-menu.open').forEach(menu => menu.classList.remove('open'));
   }
 });
 
@@ -646,7 +418,6 @@ function setupEditButton() {
   const logoutBtn = document.getElementById('logout-btn');
   if (!editBtn || !logoutBtn) return;
 
-  // Show edit and logout buttons only if viewing own profile
   if (currentUser && viewedProfile && currentUser.id === viewedProfile.id) {
     editBtn.style.display = 'block';
     editBtn.onclick = openEditModal;
@@ -658,8 +429,63 @@ function setupEditButton() {
   }
 }
 
+function setupReportButton() {
+  const reportBtn = document.getElementById('report-btn');
+  if (!reportBtn) return;
+  if (!currentUser || !viewedProfile || currentUser.id === viewedProfile.id) {
+    reportBtn.style.display = 'none';
+    return;
+  }
+  reportBtn.style.display = 'block';
+  reportBtn.onclick = () => {
+    if (typeof window.openReportModal !== 'function') {
+      alert('Модуль жалоб не загружен');
+      return;
+    }
+    const info = {
+      name: viewedProfile.full_name || viewedProfile.username || viewedProfile.id
+    };
+    window.openReportModal('user', viewedProfile.id, info);
+  };
+}
+
+function setupBanButton() {
+  const banBtn = document.getElementById('ban-btn');
+  if (!banBtn) return;
+  if (!currentUser || !isCurrentUserAdmin || !viewedProfile || currentUser.id === viewedProfile.id) {
+    banBtn.style.display = 'none';
+    return;
+  }
+  banBtn.style.display = 'block';
+  updateBanButtonLabel(banBtn);
+  banBtn.onclick = async () => {
+    const isBanned = viewedProfile?.role === 'banned';
+    const nextRole = isBanned ? 'user' : 'banned';
+    const ok = confirm(isBanned ? 'Разблокировать пользователя?' : 'Заблокировать пользователя?');
+    if (!ok) return;
+    try {
+      await api.update('profiles', viewedProfile.id, { role: nextRole });
+      viewedProfile.role = nextRole;
+      updateBanButtonLabel(banBtn);
+      alert(isBanned ? 'Пользователь разблокирован' : 'Пользователь заблокирован');
+    } catch (e) {
+      console.error('Ban update error:', e);
+      alert('Не удалось изменить статус пользователя');
+    }
+  };
+}
+
+function updateBanButtonLabel(btn) {
+  if (!btn) return;
+  const isBanned = viewedProfile?.role === 'banned';
+  btn.textContent = isBanned ? '✅ Разблокировать' : '🚫 Заблокировать';
+  btn.classList.toggle('blocked', isBanned);
+}
+
 function openEditModal() {
   if (!viewedProfile) return;
+  const modal = document.getElementById('edit-modal');
+  if (!modal) return;
 
   document.getElementById('edit-name').value = viewedProfile.full_name || '';
   document.getElementById('edit-nickname').value = viewedProfile.username || '';
@@ -667,325 +493,136 @@ function openEditModal() {
   document.getElementById('edit-location').value = viewedProfile.location || '';
   document.getElementById('edit-about').value = viewedProfile.about || viewedProfile.bio || viewedProfile.description || '';
 
-  // Render interests checkboxes
-  const interestsContainer = document.getElementById('edit-interests-container');
-  interestsContainer.innerHTML = '';
+  const preview = document.getElementById('photo-preview');
+  if (preview) {
+    const url = viewedProfile.photo_URL && viewedProfile.photo_URL !== 'user' ? viewedProfile.photo_URL : DEFAULT_AVATAR;
+    preview.innerHTML = `<img src="${url}" alt="photo">`;
+  }
+
+  renderEditInterests();
+  setupEditPhotoPreview();
+  setupEditFormSubmit();
+
+  modal.style.display = 'flex';
+}
+
+function closeEditModal() {
+  const modal = document.getElementById('edit-modal');
+  if (modal) modal.style.display = 'none';
+}
+window.closeEditModal = closeEditModal;
+
+function renderEditInterests() {
+  const container = document.getElementById('edit-interests-container');
+  if (!container) return;
+  container.innerHTML = '';
+
   TOPICS.forEach(topic => {
     const isChecked = (viewedProfile.interests || []).includes(topic.id);
     const wrapper = document.createElement('div');
     wrapper.className = 'interest-checkbox-wrapper';
 
-    // Extract icon from name if not separate
-    let icon = topic.icon || '';
-    let displayName = topic.name;
-    if (!icon && topic.name) {
-      const emojiMatch = topic.name.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}])\s*/u);
-      if (emojiMatch) {
-        icon = emojiMatch[0].trim();
-        displayName = topic.name.substring(emojiMatch[0].length).trim();
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'interest-checkbox-input';
+    input.id = `interest-${topic.id}`;
+    input.value = topic.id;
+    input.checked = isChecked;
+
+    const label = document.createElement('label');
+    label.className = 'interest-checkbox-label';
+    label.htmlFor = input.id;
+    label.textContent = topic.name;
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    container.appendChild(wrapper);
+  });
+}
+
+function setupEditPhotoPreview() {
+  const fileInput = document.getElementById('edit-photo');
+  const preview = document.getElementById('photo-preview');
+  if (!fileInput || !preview) return;
+
+  fileInput.onchange = () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Можно загружать только изображения');
+      fileInput.value = '';
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    preview.innerHTML = `<img src="${url}" alt="preview">`;
+  };
+}
+
+function setupEditFormSubmit() {
+  const form = document.getElementById('edit-form');
+  if (!form) return;
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    if (!currentUser || !viewedProfile || currentUser.id !== viewedProfile.id) return;
+
+    const full_name = document.getElementById('edit-name').value.trim();
+    const username = document.getElementById('edit-nickname').value.trim();
+    const ageRaw = document.getElementById('edit-age').value;
+    const location = document.getElementById('edit-location').value.trim();
+    const about = document.getElementById('edit-about').value.trim();
+
+    const age = ageRaw ? Number(ageRaw) : null;
+    const interests = Array.from(document.querySelectorAll('#edit-interests-container input[type="checkbox"]:checked'))
+      .map(el => el.value);
+
+    let photo_URL = viewedProfile.photo_URL;
+    const fileInput = document.getElementById('edit-photo');
+    const file = fileInput && fileInput.files && fileInput.files[0];
+    if (file) {
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const resp = await fetch('/api/upload/avatar', { method: 'POST', body: fd });
+        if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
+        const json = await resp.json();
+        photo_URL = json && json.url ? json.url : photo_URL;
+      } catch (err) {
+        console.error('Avatar upload error:', err);
+        alert('Не удалось загрузить фото');
+        return;
       }
     }
 
-    wrapper.innerHTML = `
-      <input type="checkbox" id="interest-${topic.id}" class="interest-checkbox-input" value="${topic.id}" ${isChecked ? 'checked' : ''}>
-      <label for="interest-${topic.id}" class="interest-checkbox-label">
-        <span>${icon}</span>
-        <span>${displayName}</span>
-      </label>
-    `;
-    interestsContainer.appendChild(wrapper);
-  });
-
-  // Clear file input and show current photo
-  const photoInput = document.getElementById('edit-photo');
-  photoInput.value = '';
-
-  const photoPreview = document.getElementById('photo-preview');
-  const avatarUrl = viewedProfile.photo_URL && viewedProfile.photo_URL !== 'user'
-    ? viewedProfile.photo_URL
-    : null;
-
-  if (avatarUrl) {
-    photoPreview.innerHTML = `<img src="${avatarUrl}" alt="Current photo">`;
-  } else {
-    photoPreview.innerHTML = `<div class="avatar-placeholder-edit"><div class="icon">👤</div></div>`;
-  }
-
-  // Add change listener for photo preview
-  photoInput.onchange = (e) => {
-    const file = e.target.files[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        photoPreview.innerHTML = `<img src="${event.target.result}" alt="Preview">`;
-      };
-      reader.readAsDataURL(file);
+    try {
+      const updated = await api.request('/api/users/profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          full_name,
+          username,
+          age,
+          location,
+          about,
+          interests,
+          photo_URL
+        })
+      });
+      viewedProfile = updated;
+      renderProfile(viewedProfile);
+      closeEditModal();
+    } catch (error) {
+      console.error('Profile update error:', error);
+      alert('Не удалось сохранить профиль');
     }
   };
-
-  document.getElementById('edit-modal').style.display = 'flex';
-}
-
-function closeEditModal() {
-  document.getElementById('edit-modal').style.display = 'none';
-}
-
-async function saveProfile() {
-  if (!currentUser || !viewedProfile) {
-    alert('Ошибка: профиль не загружен');
-    return;
-  }
-
-  const fullName = document.getElementById('edit-name').value.trim();
-  const nickname = document.getElementById('edit-nickname').value.trim();
-  const age = parseInt(document.getElementById('edit-age').value) || null;
-  const location = document.getElementById('edit-location').value.trim();
-  const about = document.getElementById('edit-about').value.trim();
-  const photoInput = document.getElementById('edit-photo');
-  const photoFile = photoInput.files[0];
-
-  // Get selected interests
-  const selectedInterests = Array.from(
-    document.querySelectorAll('.interest-checkbox-input:checked')
-  ).map(cb => cb.value);
-
-  if (!fullName) {
-    alert('Пожалуйста, введите имя');
-    return;
-  }
-
-  if (!nickname) {
-    alert('Пожалуйста, введите никнейм');
-    return;
-  }
-
-  // Check if nickname is available (if changed)
-  if (nickname !== viewedProfile.username) {
-    if (nickname.length < 3) {
-      alert('Никнейм должен быть не менее 3 символов');
-      return;
-    }
-    if (!/^[a-zA-Z0-9_]+$/.test(nickname)) {
-      alert('Никнейм может содержать только латинские буквы, цифры и подчеркивание');
-      return;
-    }
-
-    // Check if nickname is taken
-    const { data: existingUser } = await window.APP.supabase
-      .from('profiles')
-      .select('id')
-      .eq('username', nickname)
-      .maybeSingle();
-
-    if (existingUser && existingUser.id !== currentUser.id) {
-      alert('Этот никнейм уже занят');
-      return;
-    }
-  }
-
-  try {
-    let photoUrl = viewedProfile.photo_URL; // Keep existing if no new file
-
-    // Upload new photo if selected
-    if (photoFile) {
-      // Validate file
-      if (!photoFile.type.startsWith('image/')) {
-        alert('Пожалуйста, выберите изображение');
-        return;
-      }
-      if (photoFile.size > 5 * 1024 * 1024) {
-        alert('Размер файла должен быть меньше 5MB');
-        return;
-      }
-
-      const avatarPath = `avatars/${currentUser.id}/${Date.now()}_${photoFile.name}`;
-      const { error: uploadError } = await window.APP.supabase.storage
-        .from('profiles')
-        .upload(avatarPath, photoFile, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data } = window.APP.supabase.storage
-        .from('profiles')
-        .getPublicUrl(avatarPath);
-      photoUrl = data?.publicUrl || 'user';
-    }
-
-    const { error } = await window.APP.supabase
-      .from('profiles')
-      .update({
-        full_name: fullName,
-        username: nickname,
-        age: age,
-        location: location,
-        about: about,
-        photo_URL: photoUrl,
-        interests: selectedInterests
-      })
-      .eq('id', currentUser.id);
-
-    if (error) throw error;
-
-    // Update local profile object
-    viewedProfile.full_name = fullName;
-    viewedProfile.username = nickname;
-    viewedProfile.age = age;
-    viewedProfile.location = location;
-    viewedProfile.about = about;
-    viewedProfile.photo_URL = photoUrl;
-    viewedProfile.interests = selectedInterests;
-
-    // Re-render profile
-    renderProfile(viewedProfile);
-    closeEditModal();
-    alert('✅ Профиль успешно обновлен!');
-  } catch (error) {
-    console.error('Ошибка при сохранении профиля:', error);
-    alert('❌ Ошибка при сохранении профиля: ' + error.message);
-  }
 }
 
 async function handleLogout() {
-  const confirmed = confirm('Вы уверены, что хотите выйти?');
-  if (!confirmed) {
-    return;
-  }
-
   try {
-    const { error } = await window.APP.supabase.auth.signOut();
-    if (error) throw error;
-
-    window.location.href = 'index.html';
-  } catch (error) {
-    console.error('Ошибка при выходе:', error);
-    alert('❌ Ошибка при выходе: ' + error.message);
+    await api.request('/api/auth/logout', { method: 'POST' });
+  } catch (_e) {
+    // ignore
   }
+  window.location.href = 'index.html';
 }
-
-function setupReportButton() {
-  const reportBtn = document.getElementById('report-btn');
-  const messageBtn = document.getElementById('message-btn');
-  if (!reportBtn) return;
-
-  // Show report button only if viewing someone else's profile
-  if (currentUser && viewedProfile && currentUser.id !== viewedProfile.id) {
-    reportBtn.style.display = 'block';
-    reportBtn.onclick = () => {
-      const displayName = viewedProfile.full_name || viewedProfile.username || 'Пользователь';
-      if (typeof window.openReportModal === 'function') {
-        window.openReportModal('user', viewedProfile.id, displayName);
-      }
-    };
-  } else {
-    reportBtn.style.display = 'none';
-  }
-}
-
-async function setupBanButton() {
-  const banBtn = document.getElementById('ban-btn');
-  if (!banBtn) return;
-
-  if (!currentUser || !viewedProfile || currentUser.id === viewedProfile.id) {
-    banBtn.style.display = 'none';
-    return;
-  }
-
-  banBtn.style.display = 'block';
-
-  let isBlocked = await checkIfUserIsBlocked(viewedProfile.id);
-  updateBanButton(banBtn, isBlocked);
-
-  banBtn.onclick = async () => {
-    if (isBlocked) {
-      await unbanUser(viewedProfile.id);
-    } else {
-      await banUser(viewedProfile.id);
-    }
-    isBlocked = await checkIfUserIsBlocked(viewedProfile.id);
-    updateBanButton(banBtn, isBlocked);
-  };
-}
-
-function updateBanButton(btn, isBlocked) {
-  if (isBlocked) {
-    btn.textContent = 'Разблокировать';
-    btn.classList.add('blocked');
-  } else {
-    btn.textContent = 'Заблокировать';
-    btn.classList.remove('blocked');
-  }
-}
-
-async function getCurrentUserBlockedList() {
-  if (!currentUser) return [];
-
-  try {
-    const { data, error } = await window.APP.supabase
-      .from(window.APP.TABLES.profiles)
-      .select('blocked_users')
-      .eq('id', currentUser.id)
-      .single();
-
-    if (error) {
-      console.error('Error loading blocked list:', error);
-      return [];
-    }
-
-    return Array.isArray(data?.blocked_users) ? data.blocked_users : [];
-  } catch (error) {
-    console.error('Error loading blocked list:', error);
-    return [];
-  }
-}
-
-async function checkIfUserIsBlocked(blockedUserId) {
-  const blockedList = await getCurrentUserBlockedList();
-  return blockedList.includes(blockedUserId);
-}
-
-async function banUser(blockedUserId) {
-  if (!currentUser) return;
-
-  const blockedList = await getCurrentUserBlockedList();
-  if (blockedList.includes(blockedUserId)) return;
-
-  const nextList = [...blockedList, blockedUserId];
-  const { error } = await window.APP.supabase
-    .from(window.APP.TABLES.profiles)
-    .update({ blocked_users: nextList })
-    .eq('id', currentUser.id);
-
-  if (error) {
-    console.error('Error blocking user:', error);
-    alert('Failed to block user');
-    return;
-  }
-
-  alert('User blocked');
-}
-
-async function unbanUser(blockedUserId) {
-  if (!currentUser) return;
-
-  const blockedList = await getCurrentUserBlockedList();
-  const nextList = blockedList.filter((id) => id !== blockedUserId);
-
-  const { error } = await window.APP.supabase
-    .from(window.APP.TABLES.profiles)
-    .update({ blocked_users: nextList })
-    .eq('id', currentUser.id);
-
-  if (error) {
-    console.error('Error unblocking user:', error);
-    alert('Failed to unblock user');
-    return;
-  }
-
-  alert('User unblocked');
-}
-
-
 

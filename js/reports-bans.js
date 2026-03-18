@@ -1,470 +1,285 @@
 /**
- * Supabase Reports and Bans Management Module
- * Handles database operations for reports and bans
+ * Reports and Bans Management Module (API-backed)
+ * Replaces old Supabase direct DB calls with `js/api.js` proxy requests.
  */
 
-const supabaseClient = window.APP.supabase;
-
-/**
- * Report Management Functions
- */
 const ReportService = {
-  /**
-   * Submit a new report
-   * @param {string} reportType - 'user', 'event', or 'chat'
-   * @param {string} reportedItemId - UUID of reported item
-   * @param {string} reportedByUserId - UUID of reporter
-   * @param {string} reason - Reason from REPORT_REASONS
-   * @param {string} description - Optional description
-   * @returns {Promise}
-   */
   async submitReport(reportType, reportedItemId, reportedByUserId, reason, description = '') {
     try {
-      const { data, error } = await supabaseClient
-        .from('reports')
-        .insert([
-          {
-            report_type: reportType,
-            reported_item_id: reportedItemId,
-            reported_by_user_id: reportedByUserId,
-            reason: reason,
-            description: description,
-            status: 'pending'
-          }
-        ])
-        .select();
+      const rows = await api.insert('reports', {
+        report_type: reportType,
+        reported_item_id: reportedItemId,
+        reported_by_user_id: reportedByUserId,
+        reason,
+        description,
+        status: 'pending'
+      });
 
-      if (error) throw error;
+      const data = Array.isArray(rows) ? rows : [];
 
-      // Notify admins about new report (non-blocking - don't fail if notification fails)
-      if (data && data.length > 0) {
+      // Non-blocking admin notification
+      if (data.length > 0) {
         const reportId = data[0].id;
-        const typeLabel = {
-          user: 'пользователя',
-          event: 'встречу',
-          chat: 'чат'
-        }[reportType] || 'элемент';
-
-        // Send notification asynchronously without waiting
+        const typeLabel = { user: 'пользователя', event: 'встречу', chat: 'чат' }[reportType] || 'элемент';
         NotificationService.notifyAdmins(
           'new_report',
           'reports',
           reportId,
           `Новая жалоба на ${typeLabel}`,
           `Причина: ${reason}. ${description ? 'Описание: ' + description : ''}`
-        ).catch(err => console.error('Failed to notify admins:', err));
+        ).catch(() => {});
       }
 
       return { success: true, data };
     } catch (error) {
       console.error('Error submitting report:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Get all reports (admin only)
-   */
   async getAllReports(filters = {}) {
     try {
-      let query = supabaseClient.from('reports').select('*');
-
-      if (filters.status) {
-        query = query.eq('status', filters.status);
-      }
-      if (filters.reportType) {
-        query = query.eq('report_type', filters.reportType);
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      return { success: true, data };
+      const q = {
+        $order: { column: 'created_at', ascending: false }
+      };
+      if (filters.status) q.status = filters.status;
+      if (filters.reportType) q.report_type = filters.reportType;
+      const data = await api.get('reports', q);
+      return { success: true, data: data || [] };
     } catch (error) {
       console.error('Error fetching reports:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Get pending reports count
-   */
   async getPendingReportsCount() {
     try {
-      const { count, error } = await supabaseClient
-        .from('reports')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
-
-      if (error) throw error;
-      return { success: true, count };
+      const result = await api.query('reports', 'count', {}, { status: 'pending' });
+      return { success: true, count: Number(result && result.count) || 0 };
     } catch (error) {
       console.error('Error fetching pending reports count:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Update report status
-   */
   async updateReportStatus(reportId, newStatus, adminNotes = '') {
     try {
-      const { data, error } = await supabaseClient
-        .from('reports')
-        .update({
-          status: newStatus,
-          admin_notes: adminNotes,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', reportId)
-        .select();
-
-      if (error) throw error;
-      return { success: true, data };
+      const rows = await api.update('reports', reportId, {
+        status: newStatus,
+        admin_notes: adminNotes,
+        updated_at: new Date().toISOString()
+      });
+      return { success: true, data: rows || [] };
     } catch (error) {
       console.error('Error updating report:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Get reports for a specific item
-   */
   async getReportsForItem(itemId, itemType) {
     try {
-      const { data, error } = await supabaseClient
-        .from('reports')
-        .select('*')
-        .eq('reported_item_id', itemId)
-        .eq('report_type', itemType)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return { success: true, data };
+      const data = await api.get('reports', {
+        reported_item_id: itemId,
+        report_type: itemType,
+        $order: { column: 'created_at', ascending: false }
+      });
+      return { success: true, data: data || [] };
     } catch (error) {
       console.error('Error fetching reports for item:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   }
 };
 
-/**
- * Ban Management Functions
- */
 const BanService = {
-  /**
-   * Create a ban
-   * @param {string} banType - 'user', 'event', or 'chat'
-   * @param {string} bannedItemId - UUID of banned item
-   * @param {string} bannedByUserId - UUID of admin
-   * @param {string} reason - Ban reason
-   * @param {boolean} isPermanent - True for permanent, false for temporary
-   * @param {Date} banUntil - Expiration date (required if not permanent)
-   */
   async createBan(banType, bannedItemId, bannedByUserId, reason, isPermanent = true, banUntil = null) {
     try {
-      const { data, error } = await supabaseClient
-        .from('bans')
-        .insert([
-          {
-            ban_type: banType,
-            banned_item_id: bannedItemId,
-            banned_by_user_id: bannedByUserId,
-            reason: reason,
-            is_permanent: isPermanent,
-            ban_until: banUntil,
-            is_active: true
-          }
-        ])
-        .select();
-
-      if (error) throw error;
-      return { success: true, data };
+      const rows = await api.insert('bans', {
+        ban_type: banType,
+        banned_item_id: bannedItemId,
+        banned_by_user_id: bannedByUserId,
+        reason,
+        is_permanent: !!isPermanent,
+        ban_until: banUntil,
+        is_active: true
+      });
+      return { success: true, data: rows || [] };
     } catch (error) {
       console.error('Error creating ban:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Check if an item is currently banned
-   */
   async isItemBanned(itemId, itemType) {
     try {
-      const { data, error } = await supabaseClient
-        .from('bans')
-        .select('*')
-        .eq('banned_item_id', itemId)
-        .eq('ban_type', itemType)
-        .eq('is_active', true)
-        .or(`is_permanent.eq.true,ban_until.gt.${new Date().toISOString()}`)
-        .limit(1);
-
-      if (error) throw error;
-      return { success: true, isBanned: data.length > 0, ban: data[0] || null };
+      const nowIso = new Date().toISOString();
+      const data = await api.get('bans', {
+        banned_item_id: itemId,
+        ban_type: itemType,
+        is_active: true,
+        $or: [{ is_permanent: true }, { ban_until: { gt: nowIso } }],
+        $order: { column: 'created_at', ascending: false },
+        $limit: 1
+      });
+      const ban = (data || [])[0] || null;
+      return { success: true, isBanned: !!ban, ban };
     } catch (error) {
       console.error('Error checking ban status:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Get all active bans
-   */
   async getActiveBans(filters = {}) {
     try {
-      let query = supabaseClient
-        .from('bans')
-        .select('*')
-        .eq('is_active', true)
-        .or(`is_permanent.eq.true,ban_until.gt.${new Date().toISOString()}`);
-
-      if (filters.banType) {
-        query = query.eq('ban_type', filters.banType);
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      return { success: true, data };
+      const nowIso = new Date().toISOString();
+      const q = {
+        is_active: true,
+        $or: [{ is_permanent: true }, { ban_until: { gt: nowIso } }],
+        $order: { column: 'created_at', ascending: false }
+      };
+      if (filters.banType) q.ban_type = filters.banType;
+      const data = await api.get('bans', q);
+      return { success: true, data: data || [] };
     } catch (error) {
       console.error('Error fetching active bans:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Lift a ban (deactivate)
-   */
   async liftBan(banId) {
     try {
-      const { data, error } = await supabaseClient
-        .from('bans')
-        .update({
-          is_active: false,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', banId)
-        .select();
-
-      if (error) throw error;
-      return { success: true, data };
+      const rows = await api.update('bans', banId, {
+        is_active: false,
+        updated_at: new Date().toISOString()
+      });
+      return { success: true, data: rows || [] };
     } catch (error) {
       console.error('Error lifting ban:', error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  /**
-   * Get ban for a specific item
-   */
-  async getBanForItem(itemId, itemType) {
-    try {
-      const { data, error } = await supabaseClient
-        .from('bans')
-        .select('*')
-        .eq('banned_item_id', itemId)
-        .eq('ban_type', itemType)
-        .eq('is_active', true);
-
-      if (error) throw error;
-      return { success: true, ban: data[0] || null };
-    } catch (error) {
-      console.error('Error fetching ban for item:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   }
 };
 
-/**
- * Ban Appeals Management Functions
- */
 const BanAppealService = {
-  /**
-   * Submit a ban appeal
-   */
-  async submitAppeal(banId, appealReason, userId) {
+  async submitAppeal(banId, userId, appealText) {
     try {
-      const { data, error } = await supabaseClient
-        .from('ban_appeals')
-        .insert([
-          {
-            ban_id: banId,
-            appeal_reason: appealReason,
-            appealed_by_user_id: userId,
-            status: 'pending'
-          }
-        ])
-        .select();
-
-      if (error) throw error;
-      return { success: true, data };
+      const rows = await api.insert('ban_appeals', {
+        ban_id: banId,
+        user_id: userId,
+        appeal_text: appealText,
+        status: 'pending'
+      });
+      return { success: true, data: rows || [] };
     } catch (error) {
       console.error('Error submitting ban appeal:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Get pending appeals
-   */
   async getPendingAppeals() {
     try {
-      const { data, error } = await supabaseClient
-        .from('ban_appeals')
-        .select('*')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-      return { success: true, data };
+      const data = await api.get('ban_appeals', {
+        status: 'pending',
+        $order: { column: 'created_at', ascending: true }
+      });
+      return { success: true, data: data || [] };
     } catch (error) {
       console.error('Error fetching pending appeals:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Respond to a ban appeal
-   */
   async respondToAppeal(appealId, status, adminResponse = '') {
     try {
-      const { data, error } = await supabaseClient
-        .from('ban_appeals')
-        .update({
-          status: status,
-          admin_response: adminResponse,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', appealId)
-        .select();
-
-      if (error) throw error;
-      return { success: true, data };
+      const rows = await api.update('ban_appeals', appealId, {
+        status,
+        admin_response: adminResponse,
+        updated_at: new Date().toISOString()
+      });
+      return { success: true, data: rows || [] };
     } catch (error) {
       console.error('Error responding to appeal:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   }
 };
 
-/**
- * Notification Management Functions
- */
 const NotificationService = {
-  /**
-   * Send notification to all admin users
-   */
   async notifyAdmins(notificationType, relatedTable, relatedId, title, message) {
     try {
-      // Get all admin profiles
-      const { data: admins, error: adminError } = await supabaseClient
-        .from('profiles')
-        .select('id')
-        .eq('role', 'admin');
+      const admins = await api.get('profiles', { role: 'admin' });
+      if (!admins || admins.length === 0) return { success: true, data: [] };
 
-      if (adminError) throw adminError;
-      if (!admins || admins.length === 0) {
-        console.warn('No admin users found');
-        return { success: true, data: [] };
+      const created = [];
+      for (const admin of admins) {
+        try {
+          const rows = await api.insert('notifications', {
+            admin_profile_id: admin.id,
+            notification_type: notificationType,
+            related_table: relatedTable,
+            related_id: relatedId,
+            title,
+            message
+          });
+          if (Array.isArray(rows) && rows[0]) created.push(rows[0]);
+        } catch (e) {
+          // Don't fail the whole notification fanout
+        }
       }
-
-      // Create notifications for all admin users
-      const notifications = admins.map(admin => ({
-        admin_profile_id: admin.id,
-        notification_type: notificationType,
-        related_table: relatedTable,
-        related_id: relatedId,
-        title: title,
-        message: message
-      }));
-
-      const { data, error } = await supabaseClient
-        .from('notifications')
-        .insert(notifications)
-        .select();
-
-      if (error) throw error;
-      console.log(`Notification sent to ${admins.length} admin(s)`);
-      return { success: true, data };
+      return { success: true, data: created };
     } catch (error) {
       console.error('Error sending notifications:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Get admin notifications for current user
-   */
   async getAdminNotifications(unreadOnly = false) {
     try {
-      const { data: { user } } = await supabaseClient.auth.getUser();
+      const user = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
       if (!user) throw new Error('Not authenticated');
 
-      let query = supabaseClient
-        .from('notifications')
-        .select('*')
-        .eq('admin_profile_id', user.id);
+      const q = {
+        admin_profile_id: user.id,
+        $order: { column: 'created_at', ascending: false }
+      };
+      if (unreadOnly) q.is_read = false;
 
-      if (unreadOnly) {
-        query = query.eq('is_read', false);
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      return { success: true, data };
+      const data = await api.get('notifications', q);
+      return { success: true, data: data || [] };
     } catch (error) {
       console.error('Error fetching notifications:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Mark notification as read
-   */
   async markNotificationRead(notificationId) {
     try {
-      const { data, error } = await supabaseClient
-        .from('notifications')
-        .update({
-          is_read: true,
-          read_at: new Date().toISOString()
-        })
-        .eq('id', notificationId)
-        .select();
-
-      if (error) throw error;
-      return { success: true, data };
+      const rows = await api.update('notifications', notificationId, {
+        is_read: true,
+        read_at: new Date().toISOString()
+      });
+      return { success: true, data: rows || [] };
     } catch (error) {
       console.error('Error marking notification read:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
-  /**
-   * Get unread notification count for current admin
-   */
   async getUnreadCount() {
     try {
-      const { data: { user } } = await supabaseClient.auth.getUser();
+      const user = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
       if (!user) throw new Error('Not authenticated');
-
-      const { count, error } = await supabaseClient
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('admin_profile_id', user.id)
-        .eq('is_read', false);
-
-      if (error) throw error;
-      return { success: true, count };
+      const result = await api.query('notifications', 'count', {}, { admin_profile_id: user.id, is_read: false });
+      return { success: true, count: Number(result && result.count) || 0 };
     } catch (error) {
       console.error('Error getting unread count:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || String(error) };
     }
   }
 };
 
-// Export services for use in other modules
-window.supabaseClient = supabaseClient;
 window.ReportService = ReportService;
 window.BanService = BanService;
 window.BanAppealService = BanAppealService;
 window.NotificationService = NotificationService;
+

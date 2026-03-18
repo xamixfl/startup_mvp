@@ -3,9 +3,10 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+// Always load env from `server/.env` regardless of where node is started from.
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
-const { selectRows, insertRow, updateRow, deleteRow } = require('./query');
+const { selectRows, insertRow, updateRow, deleteRow, deleteWhere } = require('./query');
 const { createProfileUser, findProfileByEmail, createSession, deleteSession, setSessionCookie, clearSessionCookie, authMiddleware, requireAuth, updateProfile } = require('./auth');
 const { uploader, getUploadRoot } = require('./uploads');
 const bcrypt = require('bcryptjs');
@@ -13,13 +14,23 @@ const bcrypt = require('bcryptjs');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 
+// Minimal in-memory typing state: { chatId -> { userId -> expiresAtMs } }
+const typingState = new Map();
+const TYPING_TTL_MS = 3500;
+
 app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
-app.use(authMiddleware);
 
 // Serve uploads and frontend from the project root so js/api.js can call `/api/*` same-origin.
 app.use('/uploads', express.static(getUploadRoot()));
 app.use(express.static(path.resolve(__dirname, '..', '..')));
+
+// Only API routes need auth/session lookup. Static assets/pages must not depend on DB.
+app.use('/api', authMiddleware);
+
+app.get('/api/health', async (_req, res) => {
+  return res.json({ ok: true });
+});
 
 app.post('/api/query', async (req, res) => {
   try {
@@ -27,6 +38,10 @@ app.post('/api/query', async (req, res) => {
     if (action === 'select') {
       const rows = await selectRows(table, filters);
       return res.json(rows);
+    }
+    if (action === 'count') {
+      const rows = await selectRows(table, filters);
+      return res.json({ count: Array.isArray(rows) ? rows.length : 0 });
     }
     if (action === 'insert') {
       const rows = await insertRow(table, data);
@@ -38,6 +53,10 @@ app.post('/api/query', async (req, res) => {
     }
     if (action === 'delete') {
       const rows = await deleteRow(table, data);
+      return res.json(rows);
+    }
+    if (action === 'deleteWhere') {
+      const rows = await deleteWhere(table, filters);
       return res.json(rows);
     }
     return res.status(400).json({ error: 'Unknown action' });
@@ -127,6 +146,39 @@ app.put('/api/users/profile', requireAuth, async (req, res) => {
   }
 });
 
+// Typing indicator (polling-friendly)
+app.post('/api/typing', requireAuth, async (req, res) => {
+  const { chat_id, is_typing } = req.body || {};
+  if (!chat_id) return res.status(400).json({ error: 'Missing chat_id' });
+  const chatId = String(chat_id);
+  const userId = String(req.user.id);
+
+  if (!typingState.has(chatId)) typingState.set(chatId, new Map());
+  const perChat = typingState.get(chatId);
+  if (is_typing === false) {
+    perChat.delete(userId);
+    return res.json({ ok: true });
+  }
+  perChat.set(userId, Date.now() + TYPING_TTL_MS);
+  return res.json({ ok: true });
+});
+
+app.get('/api/typing', requireAuth, async (req, res) => {
+  const chatId = String(req.query.chat_id || '');
+  if (!chatId) return res.status(400).json({ error: 'Missing chat_id' });
+  const perChat = typingState.get(chatId) || new Map();
+  const now = Date.now();
+  const active = [];
+  for (const [userId, expiresAt] of perChat.entries()) {
+    if (expiresAt > now) {
+      if (userId !== String(req.user.id)) active.push(userId);
+    } else {
+      perChat.delete(userId);
+    }
+  }
+  return res.json({ user_ids: active });
+});
+
 // Upload endpoints (multipart/form-data)
 app.post('/api/upload/avatar', uploader('avatars').single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Missing file' });
@@ -136,6 +188,11 @@ app.post('/api/upload/avatar', uploader('avatars').single('file'), async (req, r
 app.post('/api/upload/chat-image', uploader('chat').single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Missing file' });
   return res.json({ url: `/uploads/chat/${req.file.filename}` });
+});
+
+// JSON errors for API
+app.use('/api', (err, _req, res, _next) => {
+  return res.status(500).json({ error: err && err.message ? err.message : 'Server error' });
 });
 
 app.listen(port, () => {

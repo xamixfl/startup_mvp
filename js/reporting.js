@@ -338,7 +338,9 @@ async function submitReportHandler() {
     submitBtn.textContent = 'Отправка...';
 
     // Get current user ID
-    const { data: { user } } = await window.APP.supabase.auth.getUser();
+    const user = typeof window.getCurrentUser === 'function'
+      ? await window.getCurrentUser()
+      : await api.request('/api/auth/me');
     if (!user) {
       showReportMessage('Пожалуйста, войдите в систему', 'error');
       submitBtn.disabled = false;

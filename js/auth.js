@@ -1,30 +1,62 @@
-const app = window.APP;
-const supabaseClient = app.supabase;
-const { TABLES } = app;
+const { TABLES } = window.APP || {};
 
 let currentStep = 1;
 let avatarFile = null;
 let usernameCheckTimeout = null;
 let categoryMenuOpen = false;
-
-// Categories will be fetched from database
 let CATEGORIES = [];
-
-function buildSafeAvatarPath(userId, file) {
-  const fallbackExt = 'jpg';
-  const byName = (file?.name || '').split('.').pop() || '';
-  const byType = (file?.type || '').split('/').pop() || '';
-  const rawExt = (byName || byType || fallbackExt).toLowerCase();
-  const ext = rawExt.replace(/[^a-z0-9]/g, '') || fallbackExt;
-  // Storage key must be URL-safe; avoid spaces/cyrillic/special chars in filename.
-  return `avatars/${userId}/${Date.now()}.${ext}`;
-}
 
 document.addEventListener('DOMContentLoaded', async () => {
   CATEGORIES = await window.fetchTopics();
   initCategories();
   setupEventListeners();
 });
+
+function goToStep(step) {
+  document.querySelectorAll('.form-step').forEach(form => form.classList.remove('active'));
+
+  document.querySelectorAll('.step').forEach((stepEl, index) => {
+    stepEl.classList.remove('active');
+    if (index + 1 < step) stepEl.classList.add('completed');
+    else if (index + 1 === step) stepEl.classList.add('active');
+  });
+
+  const form = document.getElementById(`step${step}-form`);
+  if (form) form.classList.add('active');
+  currentStep = step;
+}
+
+function setupEventListeners() {
+  const usernameEl = document.getElementById('username');
+  if (usernameEl) usernameEl.addEventListener('input', debounce(checkUsername, 500));
+
+  const uploadText = document.getElementById('upload-text');
+  if (uploadText) {
+    uploadText.addEventListener('click', () => {
+      const input = document.getElementById('avatar-input');
+      if (input) input.click();
+    });
+  }
+
+  const avatarInput = document.getElementById('avatar-input');
+  if (avatarInput) avatarInput.addEventListener('change', handleAvatarUpload);
+
+  const next1 = document.getElementById('next-step-1');
+  if (next1) next1.addEventListener('click', validateStep1);
+  const prev2 = document.getElementById('prev-step-2');
+  if (prev2) prev2.addEventListener('click', () => goToStep(1));
+  const next2 = document.getElementById('next-step-2');
+  if (next2) next2.addEventListener('click', validateStep2);
+  const prev3 = document.getElementById('prev-step-3');
+  if (prev3) prev3.addEventListener('click', () => goToStep(2));
+  const next3 = document.getElementById('next-step-3');
+  if (next3) next3.addEventListener('click', validateStep3);
+
+  const goLogin = document.getElementById('go-to-login');
+  if (goLogin) goLogin.addEventListener('click', () => (window.location.href = 'login.html'));
+
+  setupCategoriesDropdown();
+}
 
 function isValidEmojiIcon(value) {
   if (typeof value !== 'string') return false;
@@ -38,9 +70,7 @@ function resolveCategoryLabel(category) {
   let icon = '';
 
   const explicitIcon = (category?.icon || '').trim();
-  if (isValidEmojiIcon(explicitIcon)) {
-    icon = explicitIcon;
-  }
+  if (isValidEmojiIcon(explicitIcon)) icon = explicitIcon;
 
   if (!icon && displayName) {
     const emojiMatch = displayName.match(/^([\p{Extended_Pictographic}\uFE0F\u200D]+)\s+/u);
@@ -60,10 +90,10 @@ function initCategories() {
   CATEGORIES.forEach(category => {
     const checkboxId = `category-${category.id}`;
     const wrapper = document.createElement('div');
-    
+
     const { icon, displayName } = resolveCategoryLabel(category);
     const iconHtml = icon ? `<span class="category-icon">${icon}</span>` : '';
-    
+
     wrapper.innerHTML = `
       <input type="checkbox" id="${checkboxId}" class="category-checkbox" value="${category.id}">
       <label for="${checkboxId}" class="category-label">
@@ -74,28 +104,8 @@ function initCategories() {
     container.appendChild(wrapper);
   });
 
-  // Keep trigger label in sync with selected categories.
   container.addEventListener('change', updateSelectedCategoriesLabel);
   updateSelectedCategoriesLabel();
-}
-
-function setupEventListeners() {
-  document.getElementById('username').addEventListener('input', debounce(checkUsername, 500));
-  document.getElementById('upload-text').addEventListener('click', () => {
-    document.getElementById('avatar-input').click();
-  });
-  document.getElementById('avatar-input').addEventListener('change', handleAvatarUpload);
-
-  document.getElementById('next-step-1').addEventListener('click', validateStep1);
-  document.getElementById('prev-step-2').addEventListener('click', () => goToStep(1));
-  document.getElementById('next-step-2').addEventListener('click', validateStep2);
-  document.getElementById('prev-step-3').addEventListener('click', () => goToStep(2));
-  document.getElementById('next-step-3').addEventListener('click', validateStep3);
-  document.getElementById('go-to-login').addEventListener('click', () => {
-    window.location.href = 'login.html';
-  });
-
-  setupCategoriesDropdown();
 }
 
 function setupCategoriesDropdown() {
@@ -107,21 +117,14 @@ function setupCategoriesDropdown() {
   if (!trigger || !menu || !searchInput || !dropdown) return;
 
   trigger.addEventListener('click', () => {
-    if (categoryMenuOpen) {
-      closeCategoriesMenu();
-    } else {
-      openCategoriesMenu();
-    }
+    if (categoryMenuOpen) closeCategoriesMenu();
+    else openCategoriesMenu();
   });
 
-  searchInput.addEventListener('input', (event) => {
-    filterCategoriesList(event.target.value);
-  });
+  searchInput.addEventListener('input', e => filterCategoriesList(e.target.value));
 
-  document.addEventListener('click', (event) => {
-    if (!dropdown.contains(event.target)) {
-      closeCategoriesMenu();
-    }
+  document.addEventListener('click', e => {
+    if (!dropdown.contains(e.target)) closeCategoriesMenu();
   });
 }
 
@@ -145,82 +148,60 @@ function closeCategoriesMenu() {
   const trigger = document.getElementById('categories-trigger');
   const menu = document.getElementById('categories-menu');
   if (!trigger || !menu) return;
-
   categoryMenuOpen = false;
   trigger.classList.remove('open');
   trigger.setAttribute('aria-expanded', 'false');
   menu.classList.remove('open');
+  const empty = document.getElementById('categories-empty');
+  if (empty) empty.style.display = 'none';
 }
 
-function filterCategoriesList(searchTerm) {
-  const listContainer = document.getElementById('categories-container');
-  const emptyState = document.getElementById('categories-empty');
-  if (!listContainer || !emptyState) return;
-
-  const term = (searchTerm || '').trim().toLowerCase();
-  const wrappers = Array.from(listContainer.children);
-  let visibleCount = 0;
-
-  wrappers.forEach((wrapper) => {
-    const labelText = wrapper.querySelector('.category-label span:last-child')?.textContent?.toLowerCase() || '';
-    const isVisible = !term || labelText.includes(term);
-    wrapper.style.display = isVisible ? '' : 'none';
-    if (isVisible) visibleCount += 1;
+function filterCategoriesList(query) {
+  const container = document.getElementById('categories-container');
+  const empty = document.getElementById('categories-empty');
+  if (!container) return;
+  const q = String(query || '').trim().toLowerCase();
+  let visible = 0;
+  container.querySelectorAll('.category-label').forEach(label => {
+    const text = (label.textContent || '').toLowerCase();
+    const ok = !q || text.includes(q);
+    label.parentElement.style.display = ok ? '' : 'none';
+    if (ok) visible += 1;
   });
-
-  emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+  if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
 }
 
 function updateSelectedCategoriesLabel() {
+  const selected = Array.from(document.querySelectorAll('.category-checkbox:checked'))
+    .map(cb => cb.value);
+
+  const pills = document.getElementById('selected-interests');
   const triggerText = document.getElementById('categories-trigger-text');
-  const pillsContainer = document.getElementById('selected-interests');
-  if (!triggerText) return;
+  if (pills) pills.innerHTML = '';
 
-  const selectedLabels = Array.from(document.querySelectorAll('.category-checkbox:checked'))
-    .map((checkbox) => checkbox.nextElementSibling?.querySelector('span:last-child')?.textContent)
-    .filter(Boolean);
-
-  if (pillsContainer) {
-    pillsContainer.innerHTML = '';
-    selectedLabels.forEach((label) => {
-      const pill = document.createElement('span');
-      pill.className = 'selected-interest-pill';
-      pill.textContent = label;
-      pillsContainer.appendChild(pill);
-    });
-  }
-
-  if (selectedLabels.length === 0) {
-    triggerText.textContent = 'Выберите категории';
+  if (!selected || selected.length === 0) {
+    if (triggerText) triggerText.textContent = 'Выберите категории';
     return;
   }
 
-  triggerText.textContent = `Выбрано категорий: ${selectedLabels.length}`;
-}
+  if (triggerText) triggerText.textContent = `Выбрано: ${selected.length}`;
+  if (!pills) return;
 
-function goToStep(step) {
-  document.querySelectorAll('.form-step').forEach(form => {
-    form.classList.remove('active');
+  selected.forEach(id => {
+    const item = CATEGORIES.find(c => String(c.id) === String(id));
+    const name = item?.name ? item.name.replace(/^(\S+)\s+/, '') : id;
+    const pill = document.createElement('div');
+    pill.className = 'selected-interest-pill';
+    pill.textContent = name;
+    pills.appendChild(pill);
   });
-
-  document.querySelectorAll('.step').forEach((stepEl, index) => {
-    stepEl.classList.remove('active');
-    if (index + 1 < step) {
-      stepEl.classList.add('completed');
-    } else if (index + 1 === step) {
-      stepEl.classList.add('active');
-    }
-  });
-
-  document.getElementById(`step${step}-form`).classList.add('active');
-  currentStep = step;
 }
 
 async function validateStep1() {
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
   const fullName = document.getElementById('full-name').value.trim();
-  const age = parseInt(document.getElementById('age').value);
+  const age = parseInt(document.getElementById('age').value, 10);
   const gender = document.getElementById('gender').value;
   const city = document.getElementById('city').value.trim();
   const username = document.getElementById('username').value.trim();
@@ -229,166 +210,146 @@ async function validateStep1() {
   resetErrors(['email', 'password', 'name', 'age', 'gender', 'city', 'username']);
 
   if (!email || !isValidEmail(email)) {
-    showError('email-error', 'Р’РІРµРґРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ email');
+    showError('email-error', 'Введите корректный email');
     isValid = false;
   }
-
   if (!password || password.length < 6) {
-    showError('password-error', 'РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РјРµРЅРµРµ 6 СЃРёРјРІРѕР»РѕРІ');
+    showError('password-error', 'Пароль должен быть не менее 6 символов');
     isValid = false;
   }
-
   if (!fullName) {
-    showError('name-error', 'Р’РІРµРґРёС‚Рµ РІР°С€Рµ РёРјСЏ');
+    showError('name-error', 'Введите ваше имя');
     isValid = false;
   }
-
   if (!age || age < 18 || age > 100) {
-    showError('age-error', 'Р’РѕР·СЂР°СЃС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РѕС‚ 18 РґРѕ 100 Р»РµС‚');
+    showError('age-error', 'Возраст должен быть от 18 до 100 лет');
     isValid = false;
   }
-
   if (!gender) {
-    showError('gender-error', 'Р’С‹Р±РµСЂРёС‚Рµ РІР°С€ РїРѕР»');
+    showError('gender-error', 'Выберите ваш пол');
     isValid = false;
   }
-
   if (!city) {
-    showError('city-error', 'РЈРєР°Р¶РёС‚Рµ РіРѕСЂРѕРґ РёР»Рё СЂР°Р№РѕРЅ');
+    showError('city-error', 'Укажите город или район');
     isValid = false;
   }
-
   if (!username) {
-    showError('username-error', 'Р’РІРµРґРёС‚Рµ РЅРёРєРЅРµР№Рј');
+    showError('username-error', 'Введите никнейм');
     isValid = false;
   } else if (username.length < 3) {
-    showError('username-error', 'РќРёРєРЅРµР№Рј РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РјРµРЅРµРµ 3 СЃРёРјРІРѕР»РѕРІ');
+    showError('username-error', 'Никнейм должен быть не менее 3 символов');
     isValid = false;
   } else if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    showError('username-error', 'РўРѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹, С†РёС„СЂС‹ Рё РїРѕРґС‡РµСЂРєРёРІР°РЅРёРµ');
+    showError('username-error', 'Только латинские буквы, цифры и подчеркивание');
     isValid = false;
   }
 
-  if (isValid) {
-    const emailAvailable = await checkEmailImmediately(email);
-    if (!emailAvailable) {
-      showError('email-error', 'Этот email уже зарегистрирован');
-      return;
-    }
+  if (!isValid) return;
 
-    const usernameAvailable = await checkUsernameImmediately(username);
-    if (!usernameAvailable) {
-      showError('username-error', 'Р­С‚РѕС‚ РЅРёРєРЅРµР№Рј СѓР¶Рµ Р·Р°РЅСЏС‚');
-      return;
-    }
-    goToStep(2);
-  }
-}
-
-function validateStep2() {
-  const selectedCategories = Array.from(
-    document.querySelectorAll('.category-checkbox:checked')
-  ).map(cb => cb.value);
-
-  resetErrors(['categories']);
-
-  if (selectedCategories.length === 0) {
-    showError('categories-error', 'Р’С‹Р±РµСЂРёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРЅСѓ РєР°С‚РµРіРѕСЂРёСЋ');
+  const emailAvailable = await checkEmailImmediately(email);
+  if (!emailAvailable) {
+    showError('email-error', 'Этот email уже зарегистрирован');
     return;
   }
 
+  const usernameAvailable = await checkUsernameImmediately(username);
+  if (!usernameAvailable) {
+    showError('username-error', 'Этот никнейм уже занят');
+    return;
+  }
+
+  goToStep(2);
+}
+
+function validateStep2() {
+  const selected = Array.from(document.querySelectorAll('.category-checkbox:checked')).map(cb => cb.value);
+  resetErrors(['categories']);
+  if (!selected || selected.length === 0) {
+    showError('categories-error', 'Выберите хотя бы одну категорию');
+    return;
+  }
   goToStep(3);
 }
 
 async function validateStep3() {
   resetErrors(['avatar']);
-
   const button = document.getElementById('next-step-3');
-  const originalText = button.textContent;
-  button.innerHTML = '<span class="loading"></span> Р РµРіРёСЃС‚СЂРёСЂСѓРµРј...';
-  button.disabled = true;
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.innerHTML = '<span class="loading"></span> Регистрируем...';
+    button.disabled = true;
+  }
 
-  // Declared outside try so the catch block can use them for recovery
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
   const fullName = document.getElementById('full-name').value.trim();
-  const age = parseInt(document.getElementById('age').value);
+  const age = parseInt(document.getElementById('age').value, 10);
   const gender = document.getElementById('gender').value;
   const city = document.getElementById('city').value.trim();
   const username = document.getElementById('username').value.trim();
   const about = document.getElementById('bio')?.value.trim() || '';
-  const selectedCategories = Array.from(
-    document.querySelectorAll('.category-checkbox:checked')
-  ).map(cb => cb.value);
+  const selectedCategories = Array.from(document.querySelectorAll('.category-checkbox:checked')).map(cb => cb.value);
 
-  async function buildAndInsertProfile(userId) {
-    let publicUrl = 'user';
+  try {
+    // Signup (creates session cookie)
+    await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, username, full_name: fullName })
+    }).then(async r => {
+      const payload = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(payload?.error || `API error: ${r.status}`);
+      return payload;
+    });
+
+    // Upload avatar (optional)
+    let photoUrl = 'user';
     if (avatarFile) {
-      const avatarPath = buildSafeAvatarPath(userId, avatarFile);
-      const { error: uploadError } = await supabaseClient.storage
-        .from('profiles')
-        .upload(avatarPath, avatarFile, { cacheControl: '3600', upsert: false });
-      if (uploadError) throw uploadError;
-      const { data } = supabaseClient.storage.from('profiles').getPublicUrl(avatarPath);
-      publicUrl = data?.publicUrl || 'user';
+      const form = new FormData();
+      form.append('file', avatarFile);
+      const payload = await fetch('/api/upload/avatar', { method: 'POST', body: form })
+        .then(async r => {
+          const p = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(p?.error || `Upload error: ${r.status}`);
+          return p;
+        });
+      photoUrl = payload?.url || 'user';
     }
-    const { error: profileError } = await supabaseClient
-      .from(TABLES.profiles)
-      .insert([{
-        id: userId,
-        email: email,
-        username: username,
+
+    // Complete profile
+    await fetch('/api/users/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username,
         full_name: fullName,
         age: String(age),
         sex: gender,
         location: city,
-        photo_URL: publicUrl,
+        photo_URL: photoUrl,
         interests: selectedCategories,
-        about: about,
+        about,
         role: 'user',
         blocked_users: []
-      }]);
-    if (profileError) throw profileError;
-  }
-
-  try {
-    const { data: authData, error: authError } = await supabaseClient.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-          username: username,
-          age: String(age),
-          sex: gender,
-          location: city,
-          about: about
-        },
-        emailRedirectTo: `${window.location.origin}/login.html?confirmed=true`
-      }
+      })
+    }).then(async r => {
+      const payload = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(payload?.error || `API error: ${r.status}`);
+      return payload;
     });
 
-    if (authError) throw authError;
-
-    await buildAndInsertProfile(authData.user.id);
-    showNotification('РђРєРєР°СѓРЅС‚ СЃРѕР·РґР°РЅ', 'success');
+    showNotification('Аккаунт создан', 'success');
     setTimeout(() => {
       window.location.href = 'index.html';
     }, 500);
   } catch (error) {
-    console.error('РћС€РёР±РєР° СЂРµРіРёСЃС‚СЂР°С†РёРё:', error);
-    if (error?.message?.includes('User already registered')) {
-      showNotification('Р­С‚РѕС‚ email СѓР¶Рµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ. Р’РѕР№РґРёС‚Рµ РІ Р°РєРєР°СѓРЅС‚.', 'error');
-      const loginLink = document.querySelector('.login-link a');
-      if (loginLink) {
-        loginLink.textContent = 'Р’РѕР№С‚Рё РІ Р°РєРєР°СѓРЅС‚';
-      }
-    } else {
-      showNotification(error.message || 'РћС€РёР±РєР° СЂРµРіРёСЃС‚СЂР°С†РёРё', 'error');
-    }
+    console.error('Ошибка регистрации:', error);
+    showNotification(error.message || 'Ошибка регистрации', 'error');
   } finally {
-    button.textContent = originalText;
-    button.disabled = false;
+    if (button) {
+      button.textContent = originalText;
+      button.disabled = false;
+    }
   }
 }
 
@@ -402,7 +363,7 @@ async function checkUsername() {
   }
 
   if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    showError('username-error', 'РўРѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹, С†РёС„СЂС‹ Рё РїРѕРґС‡РµСЂРєРёРІР°РЅРёРµ');
+    showError('username-error', 'Только латинские буквы, цифры и подчеркивание');
     hideUsernameStatus();
     return;
   }
@@ -415,7 +376,6 @@ async function checkUsername() {
   if (takenEl) takenEl.style.display = 'none';
 
   const isAvailable = await checkUsernameImmediately(username);
-
   if (checkingEl) checkingEl.style.display = 'none';
 
   if (isAvailable) {
@@ -429,50 +389,37 @@ async function checkUsername() {
 
 async function checkUsernameImmediately(username) {
   try {
-    const { data, error } = await supabaseClient
-      .from('profiles')
-      .select('username')
-      .eq('username', username)
-      .maybeSingle();
-
-    if (error) throw error;
-    return !data;
+    const items = await api.get(TABLES.profiles, { username });
+    return !items || items.length === 0;
   } catch (error) {
-    console.error('РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РЅРёРєРЅРµР№РјР°:', error);
-    // Р•СЃР»Рё РїСЂРѕРІРµСЂРєР° РЅРµРґРѕСЃС‚СѓРїРЅР° (РЅР°РїСЂРёРјРµСЂ, РёР·-Р·Р° RLS), РЅРµ Р±Р»РѕРєРёСЂСѓРµРј СЂРµРіРёСЃС‚СЂР°С†РёСЋ
+    console.error('Ошибка проверки никнейма:', error);
     return true;
   }
 }
+
 async function checkEmailImmediately(email) {
   try {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     if (!normalizedEmail) return false;
-
-    const { data, error } = await supabaseClient
-      .from(TABLES.profiles)
-      .select('id')
-      .eq('email', normalizedEmail)
-      .maybeSingle();
-
-    if (error) throw error;
-    return !data;
+    const items = await api.get(TABLES.profiles, { email: normalizedEmail });
+    return !items || items.length === 0;
   } catch (error) {
     console.error('Ошибка проверки email:', error);
-    // Не блокируем шаг при временной недоступности проверки.
     return true;
   }
 }
+
 function handleAvatarUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
 
   if (!file.type.startsWith('image/')) {
-    showError('avatar-error', 'Р’С‹Р±РµСЂРёС‚Рµ РёР·РѕР±СЂР°Р¶РµРЅРёРµ');
+    showError('avatar-error', 'Выберите изображение');
     return;
   }
 
   if (file.size > 5 * 1024 * 1024) {
-    showError('avatar-error', 'РР·РѕР±СЂР°Р¶РµРЅРёРµ РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ РјРµРЅСЊС€Рµ 5MB');
+    showError('avatar-error', 'Изображение должно быть меньше 5MB');
     return;
   }
 
@@ -481,9 +428,11 @@ function handleAvatarUpload(event) {
   const reader = new FileReader();
   reader.onload = function(e) {
     const avatarPreview = document.getElementById('avatar-preview');
-    avatarPreview.innerHTML = `<img src="${e.target.result}" alt="РђРІР°С‚Р°СЂ">`;
-    document.getElementById('upload-text').textContent = 'РР·РјРµРЅРёС‚СЊ С„РѕС‚Рѕ';
-    document.getElementById('avatar-error').classList.remove('show');
+    if (avatarPreview) avatarPreview.innerHTML = `<img src="${e.target.result}" alt="Аватар">`;
+    const uploadText = document.getElementById('upload-text');
+    if (uploadText) uploadText.textContent = 'Изменить фото';
+    const err = document.getElementById('avatar-error');
+    if (err) err.classList.remove('show');
   };
   reader.readAsDataURL(file);
 }
@@ -498,9 +447,7 @@ function showError(elementId, message) {
   element.textContent = message;
   element.classList.add('show');
   const inputEl = document.getElementById(elementId.replace('-error', ''));
-  if (inputEl) {
-    inputEl.classList.add('error');
-  }
+  if (inputEl) inputEl.classList.add('error');
 }
 
 function resetErrors(fields) {
@@ -511,9 +458,7 @@ function resetErrors(fields) {
       errorEl.textContent = '';
     }
     const inputEl = document.getElementById(field);
-    if (inputEl) {
-      inputEl.classList.remove('error');
-    }
+    if (inputEl) inputEl.classList.remove('error');
   });
 }
 
@@ -528,10 +473,10 @@ function hideUsernameStatus() {
 
 function showNotification(message, type = 'success') {
   const notification = document.getElementById('notification');
+  if (!notification) return;
   notification.textContent = message;
   notification.className = `notification ${type}`;
   notification.style.display = 'block';
-
   setTimeout(() => {
     notification.style.display = 'none';
   }, 5000);
@@ -547,3 +492,4 @@ function debounce(func, wait) {
     usernameCheckTimeout = setTimeout(later, wait);
   };
 }
+

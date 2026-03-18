@@ -9,7 +9,8 @@ function ensureDir(dirPath) {
 }
 
 function getUploadRoot() {
-  return path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
+  // Keep uploads under `server/` by default for predictable paths.
+  return path.resolve(__dirname, '..', process.env.UPLOAD_DIR || 'uploads');
 }
 
 function makeStorage(subdir) {
@@ -34,4 +35,3 @@ function uploader(subdir) {
 }
 
 module.exports = { getUploadRoot, uploader };
-

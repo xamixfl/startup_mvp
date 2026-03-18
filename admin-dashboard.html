@@ -497,11 +497,11 @@
 
   <!-- Scripts -->
   <script src="env.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/config.js"></script>
   <script src="js/reports-bans.js"></script>
 
   <script>
-    const supabaseClient = window.APP.supabase;
     let currentUserId = null;
     let currentReportId = null;
     let currentBanItemId = null;
@@ -509,16 +509,22 @@
 
     // Initialize
     document.addEventListener('DOMContentLoaded', async () => {
-      const { data: { user }, error } = await supabaseClient.auth.getUser();
-      
-      if (error || !user) {
+      const user = (typeof window.getCurrentUser === 'function')
+        ? await window.getCurrentUser()
+        : await api.request('/api/auth/me');
+
+      if (!user) {
         window.location.href = 'login.html';
         return;
       }
 
       currentUserId = user.id;
-      
-      // TODO: Check if user is admin in profiles table
+
+      if (user.role !== 'admin') {
+        alert('Доступ запрещен');
+        window.location.href = 'index.html';
+        return;
+      }
       
       loadStats();
       loadReports();
@@ -758,8 +764,11 @@
     }
 
     async function logout() {
-      await supabaseClient.auth.signOut();
-      window.location.href = 'login.html';
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } finally {
+        window.location.href = 'login.html';
+      }
     }
   </script>
 </body>
