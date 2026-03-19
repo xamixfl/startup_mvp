@@ -18,6 +18,29 @@ const port = Number(process.env.PORT || 3000);
 const typingState = new Map();
 const TYPING_TTL_MS = 3500;
 
+function normalizeProfilesRows(rows) {
+  if (!Array.isArray(rows)) return rows;
+  return rows.map(row => {
+    if (!row || typeof row !== 'object') return row;
+    if (row.photo_url && !row.photo_URL) {
+      row.photo_URL = row.photo_url;
+    }
+    return row;
+  });
+}
+
+function normalizeQueryPayload(table, data) {
+  if (!data || typeof data !== 'object') return data;
+  if (table !== 'profiles') return data;
+
+  // Accept frontend legacy field names.
+  if ('photo_URL' in data && !('photo_url' in data)) {
+    const { photo_URL, ...rest } = data;
+    return { ...rest, photo_url: photo_URL };
+  }
+  return data;
+}
+
 app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 
@@ -35,29 +58,30 @@ app.get('/api/health', async (_req, res) => {
 app.post('/api/query', async (req, res) => {
   try {
     const { table, action, data, filters } = req.body || {};
+    const normalizedData = normalizeQueryPayload(table, data);
     if (action === 'select') {
       const rows = await selectRows(table, filters);
-      return res.json(rows);
+      return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     if (action === 'count') {
       const rows = await selectRows(table, filters);
       return res.json({ count: Array.isArray(rows) ? rows.length : 0 });
     }
     if (action === 'insert') {
-      const rows = await insertRow(table, data);
-      return res.json(rows);
+      const rows = await insertRow(table, normalizedData);
+      return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     if (action === 'update') {
-      const rows = await updateRow(table, data);
-      return res.json(rows);
+      const rows = await updateRow(table, normalizedData);
+      return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     if (action === 'delete') {
-      const rows = await deleteRow(table, data);
-      return res.json(rows);
+      const rows = await deleteRow(table, normalizedData);
+      return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     if (action === 'deleteWhere') {
       const rows = await deleteWhere(table, filters);
-      return res.json(rows);
+      return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     return res.status(400).json({ error: 'Unknown action' });
   } catch (e) {
@@ -79,7 +103,8 @@ app.get('/api/profiles/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const rows = await selectRows('profiles', { id: userId });
-    return res.json(rows[0] || null);
+    const normalized = normalizeProfilesRows(rows);
+    return res.json(normalized[0] || null);
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed' });
   }

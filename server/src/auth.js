@@ -100,6 +100,11 @@ async function authMiddleware(req, _res, next) {
 function sanitizeProfile(profile) {
   if (!profile || typeof profile !== 'object') return null;
   const { password_hash, ...rest } = profile;
+  // Keep backward compatibility with legacy frontend field naming.
+  // DB schemas often use snake_case (`photo_url`), while the frontend expects `photo_URL`.
+  if (rest.photo_url && !rest.photo_URL) {
+    rest.photo_URL = rest.photo_url;
+  }
   return rest;
 }
 
@@ -114,6 +119,11 @@ async function updateProfile(userId, patch) {
   if ('password_hash' in patch) delete patch.password_hash;
   if ('email' in patch) {
     patch.email = String(patch.email || '').trim().toLowerCase();
+  }
+  // Accept legacy camelCase-ish field from frontend and map to common DB column.
+  if ('photo_URL' in patch && !('photo_url' in patch)) {
+    patch.photo_url = patch.photo_URL;
+    delete patch.photo_URL;
   }
   const keys = Object.keys(patch).filter(k => patch[k] !== undefined);
   if (keys.length === 0) return null;
