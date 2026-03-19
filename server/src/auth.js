@@ -12,6 +12,16 @@ function sessionTtlDays() {
   return Number.isFinite(days) && days > 0 ? days : 14;
 }
 
+function generateUuid() {
+  // Node 16+ supports crypto.randomUUID(). Keep a safe fallback for older runtimes.
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.randomBytes(16);
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant
+  const hex = b.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 async function createProfileUser(email, password, extra = {}) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) throw new Error('Email required');
@@ -19,11 +29,12 @@ async function createProfileUser(email, password, extra = {}) {
   const passwordHash = await bcrypt.hash(String(password), 10);
   const username = extra && typeof extra.username === 'string' ? extra.username.trim() : null;
   const fullName = extra && typeof extra.full_name === 'string' ? extra.full_name.trim() : null;
+  const id = generateUuid();
 
   // profiles schema is project-specific; we only set fields that are expected to exist.
   const result = await query(
-    'INSERT INTO profiles (email, password_hash, username, full_name, last_login) VALUES ($1, $2, $3, $4, now()) RETURNING *',
-    [normalized, passwordHash, username || null, fullName || null]
+    'INSERT INTO profiles (id, email, password_hash, username, full_name, last_login) VALUES ($1, $2, $3, $4, $5, now()) RETURNING *',
+    [id, normalized, passwordHash, username || null, fullName || null]
   );
   return sanitizeProfile(result.rows[0] || null);
 }

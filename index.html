@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pulse — спонтанные встречи</title>
+    <title>pulse � ���������� �������</title>
 
-    <!-- PWA мета-теги -->
+    <!-- PWA ����-���� -->
     <meta name="theme-color" content="#3b82f6">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="assets/logo.png" type="image/png">
@@ -152,7 +152,7 @@
             object-fit: cover;
         }
 
-        /* Основная сетка */
+        /* �������� ����� */
         .main-grid {
             display: grid;
             grid-template-columns: 300px 1fr;
@@ -165,7 +165,7 @@
             }
         }
 
-        /* Боковая панель */
+        /* ������� ������ */
         .sidebar {
             background: white;
             border-radius: 16px;
@@ -323,7 +323,7 @@
             line-height: 1.6;
         }
 
-        /* Лента встреч */
+        /* ����� ������ */
         .meetings-feed {
             display: flex;
             flex-direction: column;
@@ -464,7 +464,7 @@
             font-size: 12px;
         }
 
-        /* Уведомления */
+        /* ����������� */
         .notification {
             position: fixed;
             bottom: 20px;
@@ -478,7 +478,7 @@
             z-index: 1000;
         }
 
-        /* Модальное окно */
+        /* ��������� ���� */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -519,7 +519,7 @@
             color: #64748b;
         }
 
-        /* Формы */
+        /* ����� */
         .form-group {
             display: flex;
             flex-direction: column;
@@ -608,7 +608,7 @@
             background: #e2e8f0;
         }
 
-        /* Адаптивность */
+        /* ������������ */
         @media (max-width: 768px) {
             .header {
                 flex-direction: column;
@@ -631,7 +631,7 @@
             }
         }
 
-        /* Состояние "нет встреч" */
+        /* ��������� "��� ������" */
         .empty-state {
             text-align: center;
             padding: 60px 20px;
@@ -649,7 +649,7 @@
             line-height: 1.5;
         }
 
-        /* Загрузка */
+        /* �������� */
         .loading {
             text-align: center;
             padding: 40px;
@@ -768,138 +768,138 @@
 </head>
 
 <body>
-    <!-- Хедер -->
+    <!-- ����� -->
     <header class="header">
         <a href="index.html" class="logo">
             pulse
         </a>
         <div class="user-section">
-            <a id="my-events-button" class="nav-link" href="#" style="display: none;">Мои встречи</a>
-            <a id="chat-button" class="nav-link" href="chat.html" style="display: none;">Чаты<span id="chat-badge" class="nav-badge"></span></a>
+            <a id="my-events-button" class="nav-link" href="#" style="display: none;">��� �������</a>
+            <a id="chat-button" class="nav-link" href="chat.html" style="display: none;">����<span id="chat-badge" class="nav-badge"></span></a>
             <a id="user-link" class="user-link" href="#">
-                <div id="user-avatar" class="user-avatar">👤</div>
-                <span id="user-name">Гость</span>
+                <div id="user-avatar" class="user-avatar">??</div>
+                <span id="user-name">�����</span>
             </a>
-            <a id="auth-button" class="user-link" href="login.html">Войти</a>
+            <a id="auth-button" class="user-link" href="login.html">�����</a>
         </div>
     </header>
 
     <div class="search-bar">
-        <input id="global-search" class="search-input" type="text" placeholder="Поиск людей и встреч">
+        <input id="global-search" class="search-input" type="text" placeholder="����� ����� � ������">
         <div id="search-results" class="search-results"></div>
     </div>
 
-    <!-- Основной контент -->
+    <!-- �������� ������� -->
     <div class="main-grid">
-        <!-- Боковая панель -->
+        <!-- ������� ������ -->
         <aside class="sidebar">
             <a id="create-meeting-btn" class="btn-create btn-link" href="create-meeting.html">
-                + Создать встречу
+                + ������� �������
             </a>
 
             <div class="filter-section" tabindex="0">
                 <div class="filter-trigger">
-                    <h3>Категории</h3>
-                    <span class="filter-current">Все категории</span>
+                    <h3>���������</h3>
+                    <span class="filter-current">��� ���������</span>
                 </div>
                 <ul class="filter-menu" id="filter-tags">
-                    <!-- Фильтры будут добавлены через JS -->
+                    <!-- ������� ����� ��������� ����� JS -->
                 </ul>
             </div>
 
             <div class="filter-section" tabindex="0">
                 <div class="filter-trigger">
-                    <h3>Города</h3>
-                    <span class="city-filter-current">Все города</span>
+                    <h3>������</h3>
+                    <span class="city-filter-current">��� ������</span>
                 </div>
                 <div class="filter-menu" id="city-filter-list" style="flex-direction: column;">
-                    <!-- Города и поиск будут добавлены через JS -->
+                    <!-- ������ � ����� ����� ��������� ����� JS -->
                 </div>
             </div>
 
             <div class="sidebar-divider">
                 <p class="sidebar-note">
-                    <strong>Как это работает:</strong><br>
-                    1. Создай встречу<br>
-                    2. Жди участников<br>
-                    3. Общайся в чате<br>
-                    4. Встречайся вживую!
+                    <strong>��� ��� ��������:</strong><br>
+                    1. ������ �������<br>
+                    2. ��� ����������<br>
+                    3. ������� � ����<br>
+                    4. ���������� ������!
                 </p>
             </div>
         </aside>
 
-        <!-- Лента встреч -->
+        <!-- ����� ������ -->
         <main class="meetings-feed" id="meetings-feed">
-            <div class="loading">Загрузка встреч...</div>
+            <div class="loading">�������� ������...</div>
         </main>
     </div>
 
-    <!-- Уведомление -->
+    <!-- ����������� -->
     <div class="notification" id="notification"></div>
 
-    <!-- Модалка создания встречи -->
+    <!-- ������� �������� ������� -->
     <div class="modal-overlay" id="create-modal">
         <div class="modal-content">
-            <button class="modal-close" id="cancel-create">×</button>
-            <h2 class="modal-title">Создать встречу</h2>
+            <button class="modal-close" id="cancel-create">?</button>
+            <h2 class="modal-title">������� �������</h2>
             <form id="meeting-form">
                 <div class="form-group">
-                    <label class="form-label" for="meeting-title">Название встречи *</label>
-                    <input type="text" id="meeting-title" class="form-input" placeholder="Например: Игра в мафию"
+                    <label class="form-label" for="meeting-title">�������� ������� *</label>
+                    <input type="text" id="meeting-title" class="form-input" placeholder="��������: ���� � �����"
                         required>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label" for="meeting-topic">Тема встречи *</label>
+                    <label class="form-label" for="meeting-topic">���� ������� *</label>
                     <select id="meeting-topic" class="form-select" required>
-                        <option value="" disabled selected>-- Выберите тему --</option>
+                        <option value="" disabled selected>-- �������� ���� --</option>
                     </select>
                 </div>
         </div>
 
         <div class="form-group">
-            <label class="form-label" for="meeting-description">Описание</label>
+            <label class="form-label" for="meeting-description">��������</label>
             <textarea id="meeting-description" class="form-textarea"
-                placeholder="Опишите встречу: что будете делать, какие правила, что взять с собой..."></textarea>
+                placeholder="������� �������: ��� ������ ������, ����� �������, ��� ����� � �����..."></textarea>
         </div>
 
         <div class="form-group">
-            <label class="form-label" for="meeting-location">Место встречи *</label>
-            <input type="text" id="meeting-location" class="form-input" placeholder="Адрес, название кафе, парк..."
+            <label class="form-label" for="meeting-location">����� ������� *</label>
+            <input type="text" id="meeting-location" class="form-input" placeholder="�����, �������� ����, ����..."
                 required>
         </div>
 
         <div class="form-row">
             <div class="form-group">
-                <label class="form-label" for="meeting-max-slots">Максимум человек *</label>
+                <label class="form-label" for="meeting-max-slots">�������� ������� *</label>
                 <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50" value="8" required>
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="meeting-duration">Активна (часов) *</label>
+                <label class="form-label" for="meeting-duration">������� (�����) *</label>
                 <select id="meeting-duration" class="form-select">
-                    <option value="6">6 часов</option>
-                    <option value="12">12 часов</option>
-                    <option value="24" selected>24 часа</option>
-                    <option value="48">48 часов</option>
+                    <option value="6">6 �����</option>
+                    <option value="12">12 �����</option>
+                    <option value="24" selected>24 ����</option>
+                    <option value="48">48 �����</option>
                 </select>
             </div>
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="btn-primary">Создать встречу</button>
-            <button type="button" id="cancel-create-btn" class="btn-secondary">Отмена</button>
+            <button type="submit" class="btn-primary">������� �������</button>
+            <button type="button" id="cancel-create-btn" class="btn-secondary">������</button>
         </div>
         </form>
     </div>
     </div>
 
     <footer class="footer">
-        Обратная связь в Telegram:
+        �������� ����� � Telegram:
         <a href="https://t.me/Pu1seApp" target="_blank" rel="noopener">t.me/Pu1seApp</a>
     </footer>
 
-    <!-- Скрипты -->
+    <!-- ������� -->
     <script src="js/api.js"></script>
     <script src="env.js"></script>
     <script src="js/config.js"></script>

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pulse — создать встречу</title>
+    <title>pulse � ������� �������</title>
     <link rel="icon" href="assets/logo.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -240,58 +240,58 @@
             <a href="index.html" class="logo">
                 pulse
             </a>
-            <a href="index.html" class="back-link">← К ленте</a>
+            <a href="index.html" class="back-link">< � �����</a>
         </div>
 
         <div class="card">
-            <div class="title">Создать встречу</div>
-            <div class="subtitle">Заполни основные данные, и встреча появится в ленте.</div>
+            <div class="title">������� �������</div>
+            <div class="subtitle">������� �������� ������, � ������� �������� � �����.</div>
 
             <form id="create-meeting-form">
                 <div class="form-group">
-                    <label class="form-label" for="meeting-headline">Запись для ленты *</label>
+                    <label class="form-label" for="meeting-headline">������ ��� ����� *</label>
                     <textarea id="meeting-headline" class="form-textarea"
-                        placeholder="Например: Ищем пару человек на вечер настолок — уютно, без спешки."
+                        placeholder="��������: ���� ���� ������� �� ����� �������� � �����, ��� ������."
                         required></textarea>
-                    <div class="hint">Эта запись будет видна в ленте как короткое описание.</div>
+                    <div class="hint">��� ������ ����� ����� � ����� ��� �������� ��������.</div>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label" for="meeting-topic">Категория *</label>
+                    <label class="form-label" for="meeting-topic">��������� *</label>
                     <select id="meeting-topic" class="form-select" required>
-                        <option value="" disabled selected>Выберите тему</option>
+                        <option value="" disabled selected>�������� ����</option>
                     </select>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label" for="meeting-max-slots">Количество участников *</label>
+                        <label class="form-label" for="meeting-max-slots">���������� ���������� *</label>
                         <input type="number" id="meeting-max-slots" class="form-input" min="2" max="50"
-                            placeholder="Например: 6" required>
+                            placeholder="��������: 6" required>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Время жизни *</label>
+                        <label class="form-label">����� ����� *</label>
                         <div class="expires-grid">
                             <input type="date" id="meeting-expires-date" class="form-input" required>
                             <select id="meeting-expires-time" class="form-select" required></select>
                         </div>
-                        <div class="hint" id="expires-hint">Можно выбрать только в пределах 72 часов.</div>
+                        <div class="hint" id="expires-hint">����� ������� ������ � �������� 72 �����.</div>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label" for="meeting-city">Город, район *</label>
-                    <input type="text" id="meeting-city" class="form-input" placeholder="Например: Москва, Хамовники"
+                    <label class="form-label" for="meeting-city">�����, ����� *</label>
+                    <input type="text" id="meeting-city" class="form-input" placeholder="��������: ������, ���������"
                         required>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label" for="meeting-details">Подробное описание *</label>
+                    <label class="form-label" for="meeting-details">��������� �������� *</label>
                     <textarea id="meeting-details" class="form-textarea"
-                        placeholder="Расскажи подробнее: правила, формат, что взять с собой и т.д." required></textarea>
+                        placeholder="�������� ���������: �������, ������, ��� ����� � ����� � �.�." required></textarea>
                 </div>
 
-                <button type="submit" class="btn">Опубликовать встречу</button>
+                <button type="submit" class="btn">������������ �������</button>
             </form>
         </div>
     </div>
@@ -299,7 +299,7 @@
     <div id="notification" class="notification"></div>
 
     <footer class="footer">
-        Обратная связь в Telegram:
+        �������� ����� � Telegram:
         <a href="https://t.me/Pu1seApp" target="_blank" rel="noopener">t.me/Pu1seApp</a>
     </footer>
 

@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pulse вЂ” СЂРµРіРёСЃС‚СЂР°С†РёСЏ</title>
+    <title>pulse — регистрация</title>
     
     <!-- Supabase -->
     <link rel="icon" href="assets/logo.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <!-- РЎС‚РёР»Рё -->
+    <!-- Стили -->
     <style>
         * {
             margin: 0;
@@ -114,7 +114,7 @@
             white-space: nowrap;
         }
         
-        /* Р¤РѕСЂРјС‹ */
+        /* Формы */
         .form-step {
             display: none;
             animation: fadeIn 0.3s ease;
@@ -186,7 +186,7 @@
             border-color: #3b82f6;
         }
         
-        /* РђРІР°С‚Р°СЂ */
+        /* Аватар */
         .avatar-upload {
             text-align: center;
             margin-bottom: 30px;
@@ -235,7 +235,7 @@
         .avatar-upload-text:hover {
             text-decoration: underline;
         }
-        /* РљР°С‚РµРіРѕСЂРёРё */
+        /* Категории */
         .categories-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 210px));
@@ -288,7 +288,7 @@
             font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
         }
         
-        /* РћС€РёР±РєРё */
+        /* Ошибки */
         .error-message {
             color: #ef4444;
             font-size: 14px;
@@ -300,7 +300,7 @@
             display: block;
         }
         
-        /* РљРЅРѕРїРєРё */
+        /* Кнопки */
         .form-actions {
             display: flex;
             gap: 15px;
@@ -341,7 +341,7 @@
             background: #e2e8f0;
         }
         
-        /* РЈРІРµРґРѕРјР»РµРЅРёСЏ */
+        /* Уведомления */
         .notification {
             position: fixed;
             bottom: 20px;
@@ -365,7 +365,7 @@
             to { transform: translateX(0); opacity: 1; }
         }
         
-        /* Р—Р°РіСЂСѓР·РєР° */
+        /* Загрузка */
         .loading {
             display: inline-block;
             width: 20px;
@@ -382,7 +382,7 @@
             to { transform: rotate(360deg); }
         }
         
-        /* РЎСЃС‹Р»РєРё */
+        /* Ссылки */
         .login-link {
             text-align: center;
             margin-top: 20px;
@@ -400,7 +400,7 @@
             text-decoration: underline;
         }
         
-        /* РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ */
+        /* Подтверждение */
         .confirmation-message {
             text-align: center;
             padding: 40px 20px;
@@ -447,175 +447,175 @@
         <a href="index.html" class="logo">
             pulse
         </a>
-        <h1 class="page-title">РЎРѕР·РґР°РЅРёРµ РїСЂРѕС„РёР»СЏ</h1>
+        <h1 class="page-title">Создание профиля</h1>
         
-        <!-- РРЅРґРёРєР°С‚РѕСЂ С€Р°РіРѕРІ -->
+        <!-- Индикатор шагов -->
         <div class="step-indicator">
             <div class="step active" id="step1">
                 1
-                <span class="step-label">РћСЃРЅРѕРІРЅРѕРµ</span>
+                <span class="step-label">Основное</span>
             </div>
             <div class="step" id="step2">
                 2
-                <span class="step-label">РРЅС‚РµСЂРµСЃС‹</span>
+                <span class="step-label">Интересы</span>
             </div>
             <div class="step" id="step3">
                 3
-                <span class="step-label">Р¤РѕС‚Рѕ</span>
+                <span class="step-label">Фото</span>
             </div>
             <div class="step" id="step4">
                 4
-                <span class="step-label">Р“РѕС‚РѕРІРѕ</span>
+                <span class="step-label">Готово</span>
             </div>
         </div>
         
-        <!-- РЁР°Рі 1: РћСЃРЅРѕРІРЅР°СЏ РёРЅС„РѕСЂРјР°С†РёСЏ -->
+        <!-- Шаг 1: Основная информация -->
         <form id="registration-form">
             <div class="form-step active" id="step1-form">
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Email <span class="required">*</span></label>
-                        <input type="email" id="email" class="form-input" placeholder="РІР°С€@email.com" required>
+                        <input type="email" id="email" class="form-input" placeholder="ваш@email.com" required>
                         <div class="error-message" id="email-error"></div>
                     </div>
                     
                     <div class="form-group">
-                        <label class="form-label">РџР°СЂРѕР»СЊ <span class="required">*</span></label>
-                        <input type="password" id="password" class="form-input" placeholder="РЅРµ РјРµРЅРµРµ 6 СЃРёРјРІРѕР»РѕРІ" required minlength="6">
+                        <label class="form-label">Пароль <span class="required">*</span></label>
+                        <input type="password" id="password" class="form-input" placeholder="не менее 6 символов" required minlength="6">
                         <div class="error-message" id="password-error"></div>
                     </div>
                 </div>
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">РРјСЏ <span class="required">*</span></label>
-                        <input type="text" id="full-name" class="form-input" placeholder="РљР°Рє РІР°СЃ Р·РѕРІСѓС‚?" required>
+                        <label class="form-label">Имя <span class="required">*</span></label>
+                        <input type="text" id="full-name" class="form-input" placeholder="Как вас зовут?" required>
                         <div class="error-message" id="name-error"></div>
                     </div>
                     
                     <div class="form-group">
-                        <label class="form-label">Р’РѕР·СЂР°СЃС‚ <span class="required">*</span></label>
+                        <label class="form-label">Возраст <span class="required">*</span></label>
                         <input type="number" id="age" class="form-input" min="18" max="100" placeholder="18" required>
                         <div class="error-message" id="age-error"></div>
                     </div>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">РџРѕР» <span class="required">*</span></label>
+                    <label class="form-label">Пол <span class="required">*</span></label>
                     <select id="gender" class="form-select" required>
-                        <option value="" disabled selected>Р’С‹Р±РµСЂРёС‚Рµ РїРѕР»</option>
-                        <option value="male">РњСѓР¶СЃРєРѕР№</option>
-                        <option value="female">Р–РµРЅСЃРєРёР№</option>
-                        <option value="other">Р”СЂСѓРіРѕР№</option>
-                        <option value="prefer-not-to-say">РќРµ СѓРєР°Р·С‹РІР°С‚СЊ</option>
+                        <option value="" disabled selected>Выберите пол</option>
+                        <option value="male">Мужской</option>
+                        <option value="female">Женский</option>
+                        <option value="other">Другой</option>
+                        <option value="prefer-not-to-say">Не указывать</option>
                     </select>
                     <div class="error-message" id="gender-error"></div>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">Р“РѕСЂРѕРґ, СЂР°Р№РѕРЅ <span class="required">*</span></label>
-                    <input type="text" id="city" class="form-input" placeholder="РќР°РїСЂРёРјРµСЂ: РњРѕСЃРєРІР°, РҐР°РјРѕРІРЅРёРєРё" required>
+                    <label class="form-label">Город, район <span class="required">*</span></label>
+                    <input type="text" id="city" class="form-input" placeholder="Например: Москва, Хамовники" required>
                     <div class="error-message" id="city-error"></div>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">РЈРЅРёРєР°Р»СЊРЅС‹Р№ РЅРёРєРЅРµР№Рј <span class="required">*</span></label>
-                    <input type="text" id="username" class="form-input" placeholder="РЅР°РїСЂРёРјРµСЂ: cool_cat_42" required>
+                    <label class="form-label">Уникальный никнейм <span class="required">*</span></label>
+                    <input type="text" id="username" class="form-input" placeholder="например: cool_cat_42" required>
                     <div class="error-message" id="username-error">
-                        <span id="username-checking" style="color: #3b82f6; display: none;">РџСЂРѕРІРµСЂСЏРµРј...</span>
-                        <span id="username-available" style="color: #10b981; display: none;">вњ“ РќРёРє СЃРІРѕР±РѕРґРµРЅ</span>
-                        <span id="username-taken" style="color: #ef4444; display: none;">вњ— РќРёРє СѓР¶Рµ Р·Р°РЅСЏС‚</span>
+                        <span id="username-checking" style="color: #3b82f6; display: none;">Проверяем...</span>
+                        <span id="username-available" style="color: #10b981; display: none;">✓ Ник свободен</span>
+                        <span id="username-taken" style="color: #ef4444; display: none;">✗ Ник уже занят</span>
                     </div>
                 </div>
                 
                 <div class="form-actions">
                     <button type="button" class="btn btn-primary" id="next-step-1">
-                        Р”Р°Р»РµРµ
+                        Далее
                     </button>
                 </div>
             </div>
             
-            <!-- РЁР°Рі 2: РРЅС‚РµСЂРµСЃС‹ -->
+            <!-- Шаг 2: Интересы -->
             <div class="form-step" id="step2-form">
                 <div class="form-group">
-                    <label class="form-label">Р’С‹Р±РµСЂРёС‚Рµ РёРЅС‚РµСЂРµСЃСѓСЋС‰РёРµ РєР°С‚РµРіРѕСЂРёРё <span class="required">*</span></label>
-                    <p style="color: #64748b; font-size: 14px; margin-bottom: 15px;">РћС‚РјРµС‚СЊС‚Рµ С‚РµРјС‹, РєРѕС‚РѕСЂС‹Рµ РІР°Рј РёРЅС‚РµСЂРµСЃРЅС‹</p>
+                    <label class="form-label">Выберите интересующие категории <span class="required">*</span></label>
+                    <p style="color: #64748b; font-size: 14px; margin-bottom: 15px;">Отметьте темы, которые вам интересны</p>
                     
                     <div class="categories-grid" id="categories-container">
-                        <!-- РљР°С‚РµРіРѕСЂРёРё Р±СѓРґСѓС‚ РґРѕР±Р°РІР»РµРЅС‹ С‡РµСЂРµР· JS -->
+                        <!-- Категории будут добавлены через JS -->
                     </div>
                     <div class="error-message" id="categories-error"></div>
                 </div>
                 
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" id="prev-step-2">
-                        РќР°Р·Р°Рґ
+                        Назад
                     </button>
                     <button type="button" class="btn btn-primary" id="next-step-2">
-                        Р”Р°Р»РµРµ
+                        Далее
                     </button>
                 </div>
             </div>
             
-            <!-- РЁР°Рі 3: Р¤РѕС‚Рѕ РїСЂРѕС„РёР»СЏ -->
+            <!-- Шаг 3: Фото профиля -->
             <div class="form-step" id="step3-form">
                 <div class="avatar-upload">
                     <div class="avatar-preview" id="avatar-preview">
                         <div class="avatar-placeholder">
-                            <div class="icon">рџ‘¤</div>
-                            <div>Р¤РѕС‚Рѕ РїСЂРѕС„РёР»СЏ</div>
+                            <div class="icon">👤</div>
+                            <div>Фото профиля</div>
                         </div>
                     </div>
                     <input type="file" id="avatar-input" accept="image/*" style="display: none;">
-                    <div class="avatar-upload-text" id="upload-text">Р—Р°РіСЂСѓР·РёС‚СЊ С„РѕС‚Рѕ</div>
+                    <div class="avatar-upload-text" id="upload-text">Загрузить фото</div>
                     <div class="error-message" id="avatar-error"></div>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">РќРµР±РѕР»СЊС€РѕРµ РѕРїРёСЃР°РЅРёРµ Рѕ СЃРµР±Рµ</label>
-                    <textarea id="bio" class="form-input" placeholder="Р Р°СЃСЃРєР°Р¶РёС‚Рµ РЅРµРјРЅРѕРіРѕ Рѕ СЃРµР±Рµ, СЃРІРѕРёС… СѓРІР»РµС‡РµРЅРёСЏС…..." rows="4"></textarea>
+                    <label class="form-label">Небольшое описание о себе</label>
+                    <textarea id="bio" class="form-input" placeholder="Расскажите немного о себе, своих увлечениях..." rows="4"></textarea>
                 </div>
                 
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" id="prev-step-3">
-                        РќР°Р·Р°Рґ
+                        Назад
                     </button>
                     <button type="button" class="btn btn-primary" id="next-step-3">
-                        Р—Р°РІРµСЂС€РёС‚СЊ СЂРµРіРёСЃС‚СЂР°С†РёСЋ
+                        Завершить регистрацию
                     </button>
                 </div>
             </div>
             
-            <!-- РЁР°Рі 4: Р—Р°РІРµСЂС€РµРЅРёРµ -->
+            <!-- Шаг 4: Завершение -->
             <div class="form-step" id="step4-form">
                 <div class="confirmation-message">
-                    <div class="confirmation-icon">вњ‰пёЏ</div>
-                    <h2 class="confirmation-title">РџРѕС‡С‚Рё РіРѕС‚РѕРІРѕ!</h2>
+                    <div class="confirmation-icon">✉️</div>
+                    <h2 class="confirmation-title">Почти готово!</h2>
                     <p class="confirmation-text" id="confirmation-text">
-                        РњС‹ РѕС‚РїСЂР°РІРёР»Рё РїРёСЃСЊРјРѕ СЃ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµРј РЅР° РІР°С€ email.<br>
-                        РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РїСЂРѕРІРµСЂСЊС‚Рµ РїРѕС‡С‚Сѓ Рё РїРµСЂРµР№РґРёС‚Рµ РїРѕ СЃСЃС‹Р»РєРµ РІ РїРёСЃСЊРјРµ, С‡С‚РѕР±С‹ Р°РєС‚РёРІРёСЂРѕРІР°С‚СЊ Р°РєРєР°СѓРЅС‚.
+                        Мы отправили письмо с подтверждением на ваш email.<br>
+                        Пожалуйста, проверьте почту и перейдите по ссылке в письме, чтобы активировать аккаунт.
                     </p>
                     <button type="button" class="btn btn-primary" id="go-to-login">
-                        РџРµСЂРµР№С‚Рё Рє РІС…РѕРґСѓ
+                        Перейти к входу
                     </button>
                 </div>
             </div>
         </form>
         
         <div class="login-link">
-            РЈР¶Рµ РµСЃС‚СЊ Р°РєРєР°СѓРЅС‚? <a href="login.html">Р’РѕР№РґРёС‚Рµ</a>
+            Уже есть аккаунт? <a href="login.html">Войдите</a>
         </div>
     </div>
     
-    <!-- РЈРІРµРґРѕРјР»РµРЅРёРµ -->
+    <!-- Уведомление -->
     <div class="notification" id="notification"></div>
 
     <footer class="footer">
-        РћР±СЂР°С‚РЅР°СЏ СЃРІСЏР·СЊ РІ Telegram:
+        Обратная связь в Telegram:
         <a href="https://t.me/Pu1seApp" target="_blank" rel="noopener">t.me/Pu1seApp</a>
     </footer>
 
-    <!-- РЎРєСЂРёРїС‚С‹ -->
+    <!-- Скрипты -->
     <script src="js/api.js"></script>
     <script src="env.js"></script>
     <script src="js/config.js"></script>
