@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>pulse � ����</title>
+  <title>pulse — чаты</title>
+  
   <link rel="icon" href="assets/logo.png" type="image/png">
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -552,12 +553,12 @@
   <div class="app" id="chat-app">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <a href="index.html" class="sidebar-back-btn" title="� �����" aria-label="� �����"><</a>
-        <span>����</span>
+        <a href="index.html" class="sidebar-back-btn" title="К ленте" aria-label="К ленте">←</a>
+        <span>Чаты</span>
       </div>
       <div class="chat-list" id="chat-list"></div>
       <div class="sidebar-footer">
-        �������� �����:
+        Обратная связь:
         <a href="https://t.me/Pu1seApp" target="_blank" rel="noopener">t.me/Pu1seApp</a>
       </div>
     </aside>
@@ -565,26 +566,26 @@
     <main class="main">
       <div class="chat-header">
         <div class="chat-header-left">
-          <div class="chat-title" id="chat-title">�������� ���</div>
-          <div class="typing-indicator" id="typing-indicator" style="display:none;">���������� ��������...</div>
+          <div class="chat-title" id="chat-title">Выберите чат</div>
+          <div class="typing-indicator" id="typing-indicator" style="display:none;">Собеседник печатает...</div>
         </div>
         <div class="chat-header-actions">
-          <button id="chat-report-btn" class="btn-report" style="display: none;">?? ������������</button>
+          <button id="chat-report-btn" class="btn-report" style="display: none;">⚠️ Пожаловаться</button>
         </div>
       </div>
       <div class="chat-body" id="chat-body">
-        <div class="chat-empty">��� ���������� ����</div>
+        <div class="chat-empty">Нет выбранного чата</div>
       </div>
       <div class="chat-input">
         <input id="chat-image-input" type="file" accept="image/*" style="display: none;">
-        <button id="chat-attach" class="btn-attach" type="button">����</button>
+        <button id="chat-attach" class="btn-attach" type="button">Фото</button>
         <div class="image-preview" id="image-preview">
           <img id="image-preview-img" src="" alt="preview">
           <div class="preview-name" id="image-preview-name"></div>
-          <button class="preview-remove" type="button" id="image-preview-remove">������</button>
+          <button class="preview-remove" type="button" id="image-preview-remove">Убрать</button>
         </div>
-        <textarea id="chat-input" placeholder="���������..." disabled></textarea>
-        <button id="chat-send" disabled>���������</button>
+        <textarea id="chat-input" placeholder="Сообщение..." disabled></textarea>
+        <button id="chat-send" disabled>Отправить</button>
       </div>
     </main>
 
@@ -598,7 +599,7 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="env.js"></script>
+<script src="env.js"></script>
   <script src="js/config.js"></script>
   <script src="js/utils.js"></script>
   <script src="js/reports-bans.js"></script>

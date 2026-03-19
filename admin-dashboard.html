@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>������������� - ������ � ����������</title>
+  <title>Администратор - Отчеты и Блокировки</title>
   <style>
     * {
       margin: 0;
@@ -361,29 +361,29 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>??? �������������</h1>
-      <button class="btn btn-secondary" onclick="logout()">�����</button>
+      <h1>🛡️ Администратор</h1>
+      <button class="btn btn-secondary" onclick="logout()">Выход</button>
     </div>
 
     <div class="stats">
       <div class="stat-card">
-        <h3>������ �� ������������</h3>
+        <h3>Отчеты на рассмотрении</h3>
         <div class="number" id="pending-count">-</div>
       </div>
       <div class="stat-card">
-        <h3>�������� ����������</h3>
+        <h3>Активных блокировок</h3>
         <div class="number" id="active-bans-count">-</div>
       </div>
       <div class="stat-card">
-        <h3>��������� �� ������������</h3>
+        <h3>Апелляции на рассмотрении</h3>
         <div class="number" id="pending-appeals-count">-</div>
       </div>
     </div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('reports')">������</button>
-      <button class="tab-btn" onclick="switchTab('bans')">����������</button>
-      <button class="tab-btn" onclick="switchTab('appeals')">���������</button>
+      <button class="tab-btn active" onclick="switchTab('reports')">Отчеты</button>
+      <button class="tab-btn" onclick="switchTab('bans')">Блокировки</button>
+      <button class="tab-btn" onclick="switchTab('appeals')">Апелляции</button>
     </div>
 
     <!-- Reports Tab -->
@@ -391,21 +391,21 @@
       <div class="table-wrapper">
         <div class="filter-controls" style="padding: 16px; border-bottom: 1px solid #e2e8f0;">
           <select class="filter-select" id="report-status-filter" onchange="loadReports()">
-            <option value="">��� �������</option>
-            <option value="pending">�� ������������</option>
-            <option value="reviewed">�����������</option>
-            <option value="resolved">���������</option>
-            <option value="dismissed">���������</option>
+            <option value="">Все статусы</option>
+            <option value="pending">На рассмотрении</option>
+            <option value="reviewed">Просмотрены</option>
+            <option value="resolved">Разрешены</option>
+            <option value="dismissed">Отклонены</option>
           </select>
           <select class="filter-select" id="report-type-filter" onchange="loadReports()">
-            <option value="">��� ����</option>
-            <option value="user">������������</option>
-            <option value="event">�������</option>
-            <option value="chat">���</option>
+            <option value="">Все типы</option>
+            <option value="user">Пользователь</option>
+            <option value="event">Событие</option>
+            <option value="chat">Чат</option>
           </select>
         </div>
         <div id="reports-container">
-          <div class="loading">�������� �������...</div>
+          <div class="loading">Загрузка отчетов...</div>
         </div>
       </div>
     </div>
@@ -415,14 +415,14 @@
       <div class="table-wrapper">
         <div class="filter-controls" style="padding: 16px; border-bottom: 1px solid #e2e8f0;">
           <select class="filter-select" id="ban-type-filter" onchange="loadBans()">
-            <option value="">��� ����</option>
-            <option value="user">������������</option>
-            <option value="event">�������</option>
-            <option value="chat">���</option>
+            <option value="">Все типы</option>
+            <option value="user">Пользователь</option>
+            <option value="event">Событие</option>
+            <option value="chat">Чат</option>
           </select>
         </div>
         <div id="bans-container">
-          <div class="loading">�������� ����������...</div>
+          <div class="loading">Загрузка блокировок...</div>
         </div>
       </div>
     </div>
@@ -431,7 +431,7 @@
     <div class="tab-content" id="appeals">
       <div class="table-wrapper">
         <div id="appeals-container">
-          <div class="loading">�������� ���������...</div>
+          <div class="loading">Загрузка апелляций...</div>
         </div>
       </div>
     </div>
@@ -441,25 +441,25 @@
   <div class="modal" id="review-report-modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>������������ ������</h2>
+        <h2>Рассмотрение отчета</h2>
         <button class="modal-close" onclick="closeModal('review-report-modal')">&times;</button>
       </div>
       <div id="report-details"></div>
       <div class="form-group">
-        <label>���������� ����������:</label>
+        <label>Примечания модератора:</label>
         <textarea id="admin-notes"></textarea>
       </div>
       <div class="form-group">
-        <label>������:</label>
+        <label>Статус:</label>
         <select id="report-status-select">
-          <option value="reviewed">�����������</option>
-          <option value="resolved">���������</option>
-          <option value="dismissed">���������</option>
+          <option value="reviewed">Просмотрено</option>
+          <option value="resolved">Разрешено</option>
+          <option value="dismissed">Отклонено</option>
         </select>
       </div>
       <div class="action-buttons">
-        <button class="btn btn-secondary" onclick="closeModal('review-report-modal')">������</button>
-        <button class="btn btn-primary" onclick="updateReportStatus()">���������</button>
+        <button class="btn btn-secondary" onclick="closeModal('review-report-modal')">Отмена</button>
+        <button class="btn btn-primary" onclick="updateReportStatus()">Сохранить</button>
       </div>
     </div>
   </div>
@@ -468,36 +468,36 @@
   <div class="modal" id="create-ban-modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>������� ����������</h2>
+        <h2>Создать блокировку</h2>
         <button class="modal-close" onclick="closeModal('create-ban-modal')">&times;</button>
       </div>
       <div class="form-group">
-        <label>�������:</label>
+        <label>Причина:</label>
         <textarea id="ban-reason"></textarea>
       </div>
       <div class="form-group">
-        <label>���:</label>
+        <label>Тип:</label>
         <select id="ban-duration-type">
-          <option value="permanent">����������</option>
-          <option value="temporary">���������</option>
+          <option value="permanent">Постоянная</option>
+          <option value="temporary">Временная</option>
         </select>
       </div>
       <div id="temporary-ban-options" style="display: none;">
         <div class="form-group">
-          <label>���:</label>
+          <label>Дни:</label>
           <input type="number" id="ban-days" value="7" min="1">
         </div>
       </div>
       <div class="action-buttons">
-        <button class="btn btn-secondary" onclick="closeModal('create-ban-modal')">������</button>
-        <button class="btn btn-danger" onclick="createBan()">������� ����������</button>
+        <button class="btn btn-secondary" onclick="closeModal('create-ban-modal')">Отмена</button>
+        <button class="btn btn-danger" onclick="createBan()">Создать блокировку</button>
       </div>
     </div>
   </div>
 
   <!-- Scripts -->
-  <script src="env.js"></script>
   <script src="js/api.js"></script>
+<script src="env.js"></script>
   <script src="js/config.js"></script>
   <script src="js/reports-bans.js"></script>
 
@@ -521,7 +521,7 @@
       currentUserId = user.id;
 
       if (user.role !== 'admin') {
-        alert('������ ��������');
+        alert('Доступ запрещен');
         window.location.href = 'index.html';
         return;
       }
@@ -573,7 +573,7 @@
       });
 
       if (!reports || reports.length === 0) {
-        container.innerHTML = '<div class="empty-state"><h3>��� �������</h3></div>';
+        container.innerHTML = '<div class="empty-state"><h3>Нет отчетов</h3></div>';
         return;
       }
 
@@ -581,12 +581,12 @@
         <table>
           <thead>
             <tr>
-              <th>���</th>
-              <th>�������</th>
-              <th>��������</th>
-              <th>������</th>
-              <th>����</th>
-              <th>��������</th>
+              <th>Тип</th>
+              <th>Причина</th>
+              <th>Жалобщик</th>
+              <th>Статус</th>
+              <th>Дата</th>
+              <th>Действие</th>
             </tr>
           </thead>
           <tbody>
@@ -599,7 +599,7 @@
                 <td>${new Date(report.created_at).toLocaleDateString()}</td>
                 <td>
                   <div class="action-buttons">
-                    <button class="btn btn-primary" onclick="reviewReport('${report.id}')">�����������</button>
+                    <button class="btn btn-primary" onclick="reviewReport('${report.id}')">Рассмотреть</button>
                   </div>
                 </td>
               </tr>
@@ -619,11 +619,11 @@
       currentReportId = reportId;
       const reportDetailsHtml = `
         <div style="margin-bottom: 20px; padding: 16px; background: #f8fafc; border-radius: 8px;">
-          <p><strong>���:</strong> ${report.report_type}</p>
-          <p><strong>ID �������:</strong> ${report.reported_item_id}</p>
-          <p><strong>�������:</strong> ${report.reason}</p>
-          <p><strong>��������:</strong> ${report.description || '-'}</p>
-          <p><strong>����:</strong> ${new Date(report.created_at).toLocaleString()}</p>
+          <p><strong>Тип:</strong> ${report.report_type}</p>
+          <p><strong>ID объекта:</strong> ${report.reported_item_id}</p>
+          <p><strong>Причина:</strong> ${report.reason}</p>
+          <p><strong>Описание:</strong> ${report.description || '-'}</p>
+          <p><strong>Дата:</strong> ${new Date(report.created_at).toLocaleString()}</p>
         </div>
       `;
 
@@ -653,7 +653,7 @@
       });
 
       if (!bans || bans.length === 0) {
-        container.innerHTML = '<div class="empty-state"><h3>��� �������� ����������</h3></div>';
+        container.innerHTML = '<div class="empty-state"><h3>Нет активных блокировок</h3></div>';
         return;
       }
 
@@ -661,12 +661,12 @@
         <table>
           <thead>
             <tr>
-              <th>���</th>
-              <th>ID �������</th>
-              <th>�������</th>
-              <th>����������</th>
-              <th>��</th>
-              <th>��������</th>
+              <th>Тип</th>
+              <th>ID объекта</th>
+              <th>Причина</th>
+              <th>Постоянная</th>
+              <th>До</th>
+              <th>Действие</th>
             </tr>
           </thead>
           <tbody>
@@ -675,10 +675,10 @@
                 <td>${ban.ban_type}</td>
                 <td>${ban.banned_item_id.substring(0, 8)}...</td>
                 <td>${ban.reason}</td>
-                <td>${ban.is_permanent ? '��' : '���'}</td>
+                <td>${ban.is_permanent ? 'Да' : 'Нет'}</td>
                 <td>${ban.ban_until ? new Date(ban.ban_until).toLocaleDateString() : '-'}</td>
                 <td>
-                  <button class="btn btn-danger" onclick="liftBan('${ban.id}')">��������</button>
+                  <button class="btn btn-danger" onclick="liftBan('${ban.id}')">Отменить</button>
                 </td>
               </tr>
             `).join('')}
@@ -689,7 +689,7 @@
     }
 
     async function liftBan(banId) {
-      if (confirm('�� ������� ��� ������ �������� ��� ����������?')) {
+      if (confirm('Вы уверены что хотите отменить эту блокировку?')) {
         await BanService.liftBan(banId);
         loadBans();
         loadStats();
@@ -701,7 +701,7 @@
       const { data: appeals } = await BanAppealService.getPendingAppeals();
 
       if (!appeals || appeals.length === 0) {
-        container.innerHTML = '<div class="empty-state"><h3>��� ���������</h3></div>';
+        container.innerHTML = '<div class="empty-state"><h3>Нет апелляций</h3></div>';
         return;
       }
 
@@ -709,11 +709,11 @@
         <table>
           <thead>
             <tr>
-              <th>������������</th>
-              <th>�������</th>
-              <th>������</th>
-              <th>����</th>
-              <th>��������</th>
+              <th>Пользователь</th>
+              <th>Причина</th>
+              <th>Статус</th>
+              <th>Дата</th>
+              <th>Действие</th>
             </tr>
           </thead>
           <tbody>
@@ -725,8 +725,8 @@
                 <td>${new Date(appeal.created_at).toLocaleDateString()}</td>
                 <td>
                   <div class="action-buttons">
-                    <button class="btn btn-primary" onclick="approveAppeal('${appeal.id}')">�������</button>
-                    <button class="btn btn-danger" onclick="rejectAppeal('${appeal.id}')">���������</button>
+                    <button class="btn btn-primary" onclick="approveAppeal('${appeal.id}')">Принять</button>
+                    <button class="btn btn-danger" onclick="rejectAppeal('${appeal.id}')">Отклонить</button>
                   </div>
                 </td>
               </tr>
@@ -738,7 +738,7 @@
     }
 
     async function approveAppeal(appealId) {
-      const response = prompt('����� ������������:');
+      const response = prompt('Ответ пользователю:');
       if (response) {
         await BanAppealService.respondToAppeal(appealId, 'approved', response);
         loadAppeals();
@@ -747,7 +747,7 @@
     }
 
     async function rejectAppeal(appealId) {
-      const response = prompt('����� ������������ (������ ���������):');
+      const response = prompt('Ответ пользователю (почему отклонено):');
       if (response) {
         await BanAppealService.respondToAppeal(appealId, 'rejected', response);
         loadAppeals();

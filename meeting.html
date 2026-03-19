@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pulse � �������</title>
+    <title>pulse — встреча</title>
+    
     <link rel="icon" href="assets/logo.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -290,21 +291,21 @@
             <a href="index.html" class="logo">
                 pulse
             </a>
-            <a href="index.html" class="back-link">< � �����</a>
+            <a href="index.html" class="back-link">← К ленте</a>
         </div>
         
         <div class="meeting-layout">
             <div class="card">
                 <div class="tag-row">
-                    <div id="meeting-tag" class="tag">#�������</div>
-                    <div id="meeting-city" class="city"><span class="location-icon" aria-hidden="true"></span>�����</div>
+                    <div id="meeting-tag" class="tag">#Встреча</div>
+                    <div id="meeting-city" class="city"><span class="location-icon" aria-hidden="true"></span>Город</div>
                 </div>
-                <div id="meeting-headline" class="headline">��������� �������</div>
+                <div id="meeting-headline" class="headline">Заголовок встречи</div>
                 
-                <div class="details-title">��������� ��������</div>
-                <div id="meeting-details" class="details-text">�������� ������� �������� �����.</div>
+                <div class="details-title">Подробное описание</div>
+                <div id="meeting-details" class="details-text">Описание встречи появится здесь.</div>
                 
-                <button id="join-button" class="join-btn">�������������� � �������</button>
+                <button id="join-button" class="join-btn">Присоединиться к встрече</button>
             </div>
             
             <div class="side-block">
@@ -312,20 +313,20 @@
                     <div class="creator">
                         <div class="creator-avatar" id="creator-avatar">A</div>
                         <div>
-                            <a id="creator-name" class="creator-name" href="profile.html">����� �������</a>
-                            <div id="creator-age" class="creator-age">������� �� ������</div>
+                            <a id="creator-name" class="creator-name" href="profile.html">Автор встречи</a>
+                            <div id="creator-age" class="creator-age">Возраст не указан</div>
                         </div>
                     </div>
                 </div>
-                <div class="card participants" id="participants-info">?? 0/0 ����������</div>
+                <div class="card participants" id="participants-info">👥 0/0 участников</div>
                 <div class="card" id="join-status-card" style="display: none;">
-                    <div class="details-title">������ �������</div>
-                    <div id="join-status-text" class="details-text" style="margin-bottom: 0;">�</div>
-                    <button id="open-chat-btn" class="btn-secondary" style="display: none; margin-top: 12px;">������� ���</button>
-                    <button id="leave-chat-btn" class="btn-secondary" style="display: none; margin-top: 12px;">�������� ���</button>
+                    <div class="details-title">Статус участия</div>
+                    <div id="join-status-text" class="details-text" style="margin-bottom: 0;">—</div>
+                    <button id="open-chat-btn" class="btn-secondary" style="display: none; margin-top: 12px;">Открыть чат</button>
+                    <button id="leave-chat-btn" class="btn-secondary" style="display: none; margin-top: 12px;">Покинуть чат</button>
                 </div>
                 <div class="card" id="requests-card" style="display: none;">
-                    <div class="details-title">������ � ���</div>
+                    <div class="details-title">Заявки в чат</div>
                     <div id="requests-list" class="details-text" style="margin-bottom: 0;"></div>
                 </div>
             </div>
@@ -335,15 +336,14 @@
     <div id="notification" class="notification"></div>
 
     <footer class="footer">
-        �������� ����� � Telegram:
+        Обратная связь в Telegram:
         <a href="https://t.me/Pu1seApp" target="_blank" rel="noopener">t.me/Pu1seApp</a>
     </footer>
     
     <script src="js/api.js"></script>
-    <script src="env.js"></script>
+<script src="env.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/meeting.js"></script>
 </body>
 </html>
-

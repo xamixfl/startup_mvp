@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pulse � �������</title>
+    <title>pulse — профиль</title>
+    
     <link rel="icon" href="assets/logo.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -610,99 +611,99 @@
             <a href="index.html" class="logo">
                 pulse
             </a>
-            <a href="index.html" class="back-link">< � �����</a>
+            <a href="index.html" class="back-link">← К ленте</a>
         </div>
 
         <div class="layout">
             <div class="card profile">
                 <div id="profile-avatar" class="avatar">A</div>
-                <div id="profile-name" class="name">������������</div>
-                <div id="profile-meta" class="meta">������� �� ������</div>
-                <div id="profile-city" class="meta">����� �� ������</div>
-                <div id="profile-about" class="about">� ����: �</div>
+                <div id="profile-name" class="name">Пользователь</div>
+                <div id="profile-meta" class="meta">Возраст не указан</div>
+                <div id="profile-city" class="meta">Город не указан</div>
+                <div id="profile-about" class="about">О себе: —</div>
                 <div id="profile-interests" class="interests"></div>
-                <button id="message-btn" class="btn-message" style="display: none;">��������</button>
-                <button id="report-btn" class="btn-report" style="display: none;">?? ������������</button>
-                <button id="ban-btn" class="btn-ban" style="display: none;">?? �������������</button>
-                <button id="edit-btn" class="btn-edit" style="display: none;">?? �������������</button>
-                <button id="logout-btn" class="btn-logout" style="display: none;">?? �����</button>
+                <button id="message-btn" class="btn-message" style="display: none;">Написать</button>
+                <button id="report-btn" class="btn-report" style="display: none;">⚠️ Пожаловаться</button>
+                <button id="ban-btn" class="btn-ban" style="display: none;">🚫 Заблокировать</button>
+                <button id="edit-btn" class="btn-edit" style="display: none;">✏️ Редактировать</button>
+                <button id="logout-btn" class="btn-logout" style="display: none;">🚪 Выйти</button>
             </div>
 
             <div class="card">
-                <div class="section-title">��������������� �������</div>
+                <div class="section-title">Запланированные встречи</div>
                 <div id="meeting-list" class="meeting-list"></div>
             </div>
         </div>
     </div>
 
     <div id="avatar-modal" class="avatar-modal">
-        <img id="avatar-modal-img" src="" alt="���� �������">
+        <img id="avatar-modal-img" src="" alt="Фото профиля">
     </div>
 
     <div id="edit-modal" class="modal-edit">
         <div class="modal-content">
-            <button class="modal-close" onclick="closeEditModal()">?</button>
-            <h2 class="modal-title">������������� �������</h2>
+            <button class="modal-close" onclick="closeEditModal()">×</button>
+            <h2 class="modal-title">Редактировать профиль</h2>
             <form id="edit-form">
                 <div class="form-group">
-                    <label class="form-label">���� �������</label>
+                    <label class="form-label">Фото профиля</label>
                     <div class="avatar-upload-wrapper">
                         <div class="avatar-preview-circle" id="photo-preview">
                             <div class="avatar-placeholder-edit">
-                                <div class="icon">??</div>
+                                <div class="icon">👤</div>
                             </div>
                         </div>
                         <input type="file" id="edit-photo" accept="image/jpeg,image/png,image/jpg,image/gif,image/webp"
                             style="display: none;">
                         <button type="button" class="upload-btn"
-                            onclick="document.getElementById('edit-photo').click()">������� ����</button>
+                            onclick="document.getElementById('edit-photo').click()">Выбрать фото</button>
                         <small
-                            style="color: #64748b; font-size: 12px; margin-top: 8px; display: block; text-align: center;">��������
+                            style="color: #64748b; font-size: 12px; margin-top: 8px; display: block; text-align: center;">Максимум
                             5MB</small>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">������ ���</label>
-                    <input type="text" id="edit-name" class="form-input" placeholder="���� ���">
+                    <label class="form-label">Полное имя</label>
+                    <input type="text" id="edit-name" class="form-input" placeholder="Ваше имя">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">�������</label>
-                    <input type="text" id="edit-nickname" class="form-input" placeholder="��� �������">
-                    <small style="color: #64748b; font-size: 12px; margin-top: 4px; display: block;">������������ ���
-                        ������ �������</small>
+                    <label class="form-label">Никнейм</label>
+                    <input type="text" id="edit-nickname" class="form-input" placeholder="Ваш никнейм">
+                    <small style="color: #64748b; font-size: 12px; margin-top: 4px; display: block;">Используется для
+                        поиска профиля</small>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">�������</label>
-                    <input type="number" id="edit-age" class="form-input" placeholder="��� �������" min="13" max="120">
+                    <label class="form-label">Возраст</label>
+                    <input type="number" id="edit-age" class="form-input" placeholder="Ваш возраст" min="13" max="120">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">�����</label>
-                    <input type="text" id="edit-location" class="form-input" placeholder="�����, �����">
+                    <label class="form-label">Город</label>
+                    <input type="text" id="edit-location" class="form-input" placeholder="Город, Район">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">� ����</label>
-                    <textarea id="edit-about" class="form-textarea" placeholder="���������� � ����..."></textarea>
+                    <label class="form-label">О себе</label>
+                    <textarea id="edit-about" class="form-textarea" placeholder="Расскажите о себе..."></textarea>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">��������</label>
+                    <label class="form-label">Интересы</label>
                     <div id="edit-interests-container"
                         style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn-save" onclick="saveProfile()">���������</button>
-                    <button type="button" class="btn-cancel" onclick="closeEditModal()">������</button>
+                    <button type="button" class="btn-save" onclick="saveProfile()">Сохранить</button>
+                    <button type="button" class="btn-cancel" onclick="closeEditModal()">Отмена</button>
                 </div>
             </form>
         </div>
     </div>
 
     <footer class="footer">
-        �������� ����� � Telegram:
+        Обратная связь в Telegram:
         <a href="https://t.me/Pu1seApp" target="_blank" rel="noopener">t.me/Pu1seApp</a>
     </footer>
 
     <script src="js/api.js"></script>
-    <script src="env.js"></script>
+<script src="env.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/reports-bans.js"></script>

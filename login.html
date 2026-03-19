@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pulse � ����</title>
+    <title>pulse — вход</title>
     
     <!-- Supabase -->
+    
     <link rel="icon" href="assets/logo.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
@@ -221,52 +222,52 @@
         <a href="index.html" class="logo">
             pulse
         </a>
-        <h1 class="page-title">���� � �������</h1>
+        <h1 class="page-title">Вход в аккаунт</h1>
         
-        <!-- ��������� �� �������� ����������� -->
+        <!-- Сообщение об успешной регистрации -->
         <div id="success-message" class="success-message" style="display: none;">
-            ������� ������� �����������! ������ �� ������ �����.
+            Аккаунт успешно подтвержден! Теперь вы можете войти.
         </div>
         
         <form id="login-form">
             <div class="form-group">
                 <label class="form-label">Email</label>
-                <input type="email" id="email" class="form-input" placeholder="���@email.com" required>
+                <input type="email" id="email" class="form-input" placeholder="ваш@email.com" required>
                 <div class="error-message" id="email-error"></div>
             </div>
             
             <div class="form-group">
-                <label class="form-label">������</label>
-                <input type="password" id="password" class="form-input" placeholder="��� ������" required>
+                <label class="form-label">Пароль</label>
+                <input type="password" id="password" class="form-input" placeholder="ваш пароль" required>
                 <div class="error-message" id="password-error"></div>
             </div>
             
             <button type="submit" class="btn btn-primary" id="login-btn">
-                �����
+                Войти
             </button>
         </form>
         
         <div class="divider">
-            <span>���</span>
+            <span>или</span>
         </div>
         
         <button class="btn btn-secondary" onclick="signInWithGoogle()">
-            ����� ����� Google
+            Войти через Google
         </button>
         
         <div class="links">
-            <a href="auth.html">������� ����� �������</a>
-            <a href="#" onclick="resetPassword()">������ ������?</a>
+            <a href="auth.html">Создать новый аккаунт</a>
+            <a href="#" onclick="resetPassword()">Забыли пароль?</a>
         </div>
     </div>
 
     <footer class="footer">
-        �������� ����� � Telegram:
+        Обратная связь в Telegram:
         <a href="https://t.me/Pu1seApp" target="_blank" rel="noopener">t.me/Pu1seApp</a>
     </footer>
 
     <script src="js/api.js"></script>
-    <script src="env.js"></script>
+<script src="env.js"></script>
     <script src="js/config.js"></script>
     <script src="js/login.js"></script>
 </body>
