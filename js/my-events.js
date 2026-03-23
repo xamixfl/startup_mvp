@@ -27,28 +27,48 @@ async function loadMeetings() {
   }
 
   try {
-    const ownedMeetings = await api.get(TABLES.meetings, {
-      creator_id: currentUser.id,
-      $order: { column: 'created_at', ascending: false }
-    });
+    const safeGetMeetings = async (filters) => {
+      // Some deployments may not have `created_at` (or server-side ordering support).
+      // Prefer DB ordering when available, otherwise sort client-side.
+      try {
+        return await api.get(TABLES.meetings, {
+          ...filters,
+          $order: { column: 'created_at', ascending: false }
+        });
+      } catch (_e) {
+        const rows = await api.get(TABLES.meetings, filters);
+        return (rows || []).sort((a, b) => {
+          const ta = new Date(a?.created_at || a?.updated_at || 0).getTime();
+          const tb = new Date(b?.created_at || b?.updated_at || 0).getTime();
+          return tb - ta;
+        });
+      }
+    };
+
+    const ownedMeetings = await safeGetMeetings({ creator_id: currentUser.id });
 
     const participantRows = await api.get(TABLES.participants, { user_id: currentUser.id });
     const participantMeetingIds = (participantRows || []).map(p => p.meeting_id).filter(Boolean);
 
     let participantMeetings = [];
     if (participantMeetingIds.length > 0) {
-      participantMeetings = await api.get(TABLES.meetings, {
-        id: { in: participantMeetingIds },
-        $order: { column: 'created_at', ascending: false }
-      });
+      participantMeetings = await safeGetMeetings({ id: { in: participantMeetingIds } });
     }
 
-    allMeetings = [
-      ...(ownedMeetings || []).map(m => ({ ...m, role: 'owner' })),
-      ...(participantMeetings || [])
-        .filter(m => m.creator_id !== currentUser.id)
-        .map(m => ({ ...m, role: 'participant' }))
-    ];
+    // Merge + dedupe by meeting id (can happen when creator is also listed as participant).
+    const byMeetingId = new Map();
+    (ownedMeetings || []).forEach(m => {
+      if (!m?.id) return;
+      byMeetingId.set(m.id, { ...m, role: 'owner' });
+    });
+    (participantMeetings || []).forEach(m => {
+      if (!m?.id) return;
+      const existing = byMeetingId.get(m.id);
+      if (existing) return;
+      const role = m.creator_id === currentUser.id ? 'owner' : 'participant';
+      byMeetingId.set(m.id, { ...m, role });
+    });
+    allMeetings = Array.from(byMeetingId.values());
 
     const creatorIds = Array.from(new Set(allMeetings.map(m => m.creator_id).filter(Boolean)));
     const creators = creatorIds.length > 0

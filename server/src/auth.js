@@ -2,6 +2,10 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { query } = require('./db');
 
+function isSafeIdentifier(value) {
+  return typeof value === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value);
+}
+
 function getCookieName() {
   return process.env.SESSION_COOKIE_NAME || 'sid';
 }
@@ -111,6 +115,15 @@ function sanitizeProfile(profile) {
   if (rest.photo_url && !rest.photo_URL) {
     rest.photo_URL = rest.photo_url;
   }
+  // Older schemas used `city`, while the current frontend expects `location`.
+  if (rest.city && !rest.location) {
+    rest.location = rest.city;
+  }
+  // Frontend prefers `about`, but DB schemas vary (`bio`, `description`).
+  if (!rest.about) {
+    if (rest.bio) rest.about = rest.bio;
+    else if (rest.description) rest.about = rest.description;
+  }
   return rest;
 }
 
@@ -126,22 +139,66 @@ async function updateProfile(userId, patch) {
   if ('email' in patch) {
     patch.email = String(patch.email || '').trim().toLowerCase();
   }
+  const columns = await getProfilesColumns();
+
+  // Work on a copy so we can safely remap/strip keys.
+  const normalized = { ...patch };
+
   // Accept legacy camelCase-ish field from frontend and map to common DB column.
-  if ('photo_URL' in patch && !('photo_url' in patch)) {
-    patch.photo_url = patch.photo_URL;
-    delete patch.photo_URL;
+  if ('photo_URL' in normalized && !('photo_url' in normalized)) {
+    normalized.photo_url = normalized.photo_URL;
+    delete normalized.photo_URL;
   }
-  const keys = Object.keys(patch).filter(k => patch[k] !== undefined);
-  if (keys.length === 0) return null;
+
+  // Map frontend `location` to legacy DB column `city` when needed.
+  if ('location' in normalized && !columns.has('location') && columns.has('city')) {
+    normalized.city = normalized.location;
+    delete normalized.location;
+  }
+
+  // Map frontend `about` to an existing DB column when needed.
+  if ('about' in normalized && !columns.has('about')) {
+    if (columns.has('bio') && !('bio' in normalized)) {
+      normalized.bio = normalized.about;
+    } else if (columns.has('description') && !('description' in normalized)) {
+      normalized.description = normalized.about;
+    }
+    delete normalized.about;
+  }
+
+  // Only update columns that actually exist in `profiles` and have safe identifiers.
+  const keys = Object.keys(normalized)
+    .filter(k => normalized[k] !== undefined)
+    .filter(k => isSafeIdentifier(k))
+    .filter(k => columns.has(k));
+
+  if (keys.length === 0) {
+    const current = await query('SELECT * FROM profiles WHERE id = $1', [userId]);
+    return sanitizeProfile(current.rows[0] || null);
+  }
 
   const params = [];
   const setSql = keys.map(key => {
-    params.push(patch[key]);
+    params.push(normalized[key]);
     return `"${key}" = $${params.length}`;
   }).join(', ');
   params.push(userId);
   const result = await query(`UPDATE profiles SET ${setSql} WHERE id = $${params.length} RETURNING *`, params);
   return sanitizeProfile(result.rows[0] || null);
+}
+
+let _profilesColumnsCache = { at: 0, set: null };
+async function getProfilesColumns() {
+  const now = Date.now();
+  if (_profilesColumnsCache.set && (now - _profilesColumnsCache.at) < 5 * 60 * 1000) {
+    return _profilesColumnsCache.set;
+  }
+  const res = await query(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'profiles'"
+  );
+  const set = new Set((res.rows || []).map(r => r.column_name).filter(Boolean));
+  _profilesColumnsCache = { at: now, set };
+  return set;
 }
 
 module.exports = {

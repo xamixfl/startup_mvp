@@ -39,6 +39,13 @@ function normalizeProfilesRows(rows) {
     if (row.photo_url && !row.photo_URL) {
       row.photo_URL = row.photo_url;
     }
+    if (row.city && !row.location) {
+      row.location = row.city;
+    }
+    if (!row.about) {
+      if (row.bio) row.about = row.bio;
+      else if (row.description) row.about = row.description;
+    }
     return row;
   });
 }
