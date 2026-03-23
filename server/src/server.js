@@ -59,6 +59,9 @@ app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 
 // Serve uploads and frontend from the project root so js/api.js can call `/api/*` same-origin.
+// Note: `express.static` returns 404 for directory requests like `/uploads/` (no index, no listing).
+// Provide a small health response for that exact path to reduce confusion during debugging.
+app.get(['/uploads', '/uploads/'], (_req, res) => res.status(200).json({ ok: true }));
 app.use('/uploads', express.static(getUploadRoot()));
 app.use(express.static(path.resolve(__dirname, '..', '..')));
 
