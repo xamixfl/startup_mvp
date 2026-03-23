@@ -9,6 +9,7 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 const { selectRows, insertRow, updateRow, deleteRow, deleteWhere } = require('./query');
 const { createProfileUser, findProfileByEmail, createSession, deleteSession, setSessionCookie, clearSessionCookie, authMiddleware, requireAuth, updateProfile } = require('./auth');
 const { uploader, getUploadRoot } = require('./uploads');
+const { query } = require('./db');
 const bcrypt = require('bcryptjs');
 
 const app = express();
@@ -55,6 +56,27 @@ app.get('/api/health', async (_req, res) => {
   return res.json({ ok: true });
 });
 
+// DB connectivity check (useful when debugging "topics not loading").
+app.get('/api/db-health', async (_req, res) => {
+  try {
+    await query('select 1 as ok');
+    return res.json({ ok: true, db: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, db: false, error: e.message || 'DB error', code: e.code });
+  }
+});
+
+// Quick diagnostic for topics table.
+app.get('/api/debug/topics', async (_req, res) => {
+  try {
+    const countRes = await query('select count(*)::int as count from topics');
+    const listRes = await query('select * from topics order by 1 asc limit 5');
+    return res.json({ ok: true, count: countRes.rows[0]?.count || 0, sample: listRes.rows || [] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message || 'DB error', code: e.code, detail: e.detail });
+  }
+});
+
 app.post('/api/query', async (req, res) => {
   try {
     const { table, action, data, filters } = req.body || {};
@@ -85,7 +107,11 @@ app.post('/api/query', async (req, res) => {
     }
     return res.status(400).json({ error: 'Unknown action' });
   } catch (e) {
-    return res.status(400).json({ error: e.message || 'Bad request' });
+    return res.status(400).json({
+      error: e && e.message ? e.message : 'Bad request',
+      code: e && e.code ? e.code : undefined,
+      detail: e && e.detail ? e.detail : undefined
+    });
   }
 });
 

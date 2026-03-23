@@ -93,6 +93,12 @@ async function authMiddleware(req, _res, next) {
     req.user = profile;
     next();
   } catch (e) {
+    // Don't break read-only endpoints (topics/feed) when auth tables are not migrated yet.
+    // Example: relation "sessions" does not exist (42P01) during initial setup.
+    if (e && e.code === '42P01') {
+      req.user = null;
+      return next();
+    }
     next(e);
   }
 }
