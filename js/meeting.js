@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   renderMeeting(meeting, user);
+  setupOwnerActions(meeting, user);
+  await ensureMeetingChat(meeting, user);
   await setupChatState(meeting, user);
 
   const joinBtn = document.getElementById('join-button');
@@ -119,6 +121,63 @@ function pickCreatorFields(profile) {
   };
 }
 
+function setupOwnerActions(meeting, user) {
+  const actionsWrap = document.getElementById('owner-actions');
+  const menuBtn = document.getElementById('owner-menu-btn');
+  const menu = document.getElementById('owner-menu');
+  const editBtn = document.getElementById('owner-edit-btn');
+  const deleteBtn = document.getElementById('owner-delete-btn');
+
+  if (!actionsWrap || !menuBtn || !menu || !editBtn || !deleteBtn) return;
+
+  const isOwner = !!(user && meeting && meeting.creator_id && user.id === meeting.creator_id);
+  actionsWrap.style.display = isOwner ? 'block' : 'none';
+  if (!isOwner) return;
+
+  const closeMenu = () => menu.classList.remove('open');
+  const toggleMenu = () => menu.classList.toggle('open');
+
+  menuBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleMenu();
+  };
+
+  editBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+    window.location.href = `create-meeting.html?edit=${meeting.id}`;
+  };
+
+  deleteBtn.onclick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+
+    const ok = confirm('Удалить эту встречу?');
+    if (!ok) return;
+
+    try {
+      if (typeof window.deleteExpiredMeeting === 'function') {
+        await window.deleteExpiredMeeting(meeting.id);
+      } else {
+        await api.delete(TABLES.meetings, meeting.id);
+      }
+      showNotification('Встреча удалена');
+      setTimeout(() => { window.location.href = 'my-events.html'; }, 400);
+    } catch (err) {
+      console.error('Ошибка удаления встречи:', err);
+      showNotification('Ошибка удаления встречи');
+    }
+  };
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#owner-actions')) return;
+    closeMenu();
+  });
+}
+
 async function setupChatState(meeting, user) {
   const statusCard = document.getElementById('join-status-card');
   const statusText = document.getElementById('join-status-text');
@@ -135,19 +194,25 @@ async function setupChatState(meeting, user) {
     return;
   }
 
-  const memberships = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
-  const membership = (memberships || [])[0] || null;
+  const hasStatus = await chatMembersHasStatus();
+  let membership = null;
+  try {
+    const memberships = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
+    membership = (memberships || [])[0] || null;
+  } catch (_e) {
+    membership = null;
+  }
 
   if (statusCard && statusText) {
     statusCard.style.display = 'block';
     if (!membership) {
       statusText.textContent = 'Вы не отправляли заявку.';
       if (joinButton) joinButton.style.display = '';
-    } else if (membership.status === 'pending') {
+    } else if (hasStatus && membership.status === 'pending') {
       statusText.textContent = 'Заявка отправлена, ожидает одобрения.';
       if (joinButton) joinButton.style.display = 'none';
-    } else if (membership.status === 'approved') {
-      statusText.textContent = 'Вы участник чата.';
+    } else if (!hasStatus || membership.status === 'approved') {
+      statusText.textContent = meeting.creator_id === user.id ? 'Вы создатель встречи.' : 'Вы участник чата.';
       if (joinButton) joinButton.style.display = 'none';
       if (openBtn) {
         openBtn.style.display = 'block';
@@ -159,14 +224,19 @@ async function setupChatState(meeting, user) {
       } else if (leaveBtn) {
         leaveBtn.style.display = 'none';
       }
-    } else if (membership.status === 'rejected') {
+    } else if (hasStatus && membership.status === 'rejected') {
       statusText.textContent = 'Заявка отклонена.';
       if (joinButton) joinButton.style.display = 'none';
     }
   }
 
-  if (meeting.creator_id && meeting.creator_id === user.id) {
-    const pending = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, status: 'pending' });
+  if (meeting.creator_id && meeting.creator_id === user.id && hasStatus) {
+    let pending = [];
+    try {
+      pending = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, status: 'pending' });
+    } catch (_e) {
+      pending = [];
+    }
 
     if (requestsCard && requestsList) {
       requestsCard.style.display = 'block';
@@ -215,13 +285,20 @@ async function requestJoin(meeting, user) {
 
   const existing = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
   if (existing && existing[0]) {
-    showNotification(existing[0].status === 'pending' ? 'Заявка уже отправлена' : 'Вы уже в чате');
+    const hasStatus = await chatMembersHasStatus();
+    showNotification(hasStatus && existing[0].status === 'pending' ? 'Заявка уже отправлена' : 'Вы уже в чате');
     return;
   }
 
   try {
-    await api.insert(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id, role: 'member', status: 'pending' });
-    showNotification('Заявка отправлена');
+    const hasStatus = await chatMembersHasStatus();
+    if (hasStatus) {
+      await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id, role: 'member', status: 'pending' });
+      showNotification('Заявка отправлена');
+    } else {
+      await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id });
+      showNotification('Вы в чате');
+    }
     const freshUser = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
     await setupChatState(meeting, freshUser || user);
   } catch (e) {
@@ -292,5 +369,72 @@ function showNotification(message) {
   notification.textContent = message;
   notification.style.display = 'block';
   setTimeout(() => { notification.style.display = 'none'; }, 3000);
+}
+
+let __chatMembersHasStatus = null;
+async function chatMembersHasStatus() {
+  if (__chatMembersHasStatus !== null) return __chatMembersHasStatus;
+  try {
+    await api.get(TABLES.chat_members, { $limit: 1, status: 'approved' });
+    __chatMembersHasStatus = true;
+  } catch (_e) {
+    __chatMembersHasStatus = false;
+  }
+  return __chatMembersHasStatus;
+}
+
+async function safeInsertChatMember(data) {
+  try {
+    return await api.insert(TABLES.chat_members, data);
+  } catch (_e) {
+    return await api.insert(TABLES.chat_members, { chat_id: data.chat_id, user_id: data.user_id });
+  }
+}
+
+async function ensureMeetingChat(meeting, user) {
+  if (!meeting || meeting.chat_id || !user) return;
+  if (!meeting.id) return;
+  if (meeting.creator_id !== user.id) return;
+
+  try {
+    // Try to link an existing chat by meeting_id (useful if meeting.chat_id wasn't set).
+    const existingChats = await api.get(TABLES.chats, {
+      meeting_id: meeting.id,
+      $order: { column: 'created_at', ascending: false },
+      $limit: 1
+    });
+    const existing = (existingChats || [])[0];
+    if (existing?.id) {
+      meeting.chat_id = existing.id;
+      try { await api.update(TABLES.meetings, meeting.id, { chat_id: existing.id }); } catch (_e) {}
+    } else {
+      // Create chat on-demand for the owner.
+      const inserted = await api.insert(TABLES.chats, {
+        meeting_id: meeting.id,
+        title: meeting.title || 'Чат встречи',
+        owner_id: user.id
+      });
+      const chat = Array.isArray(inserted) ? inserted[0] : inserted;
+      if (chat?.id) {
+        meeting.chat_id = chat.id;
+        try { await api.update(TABLES.meetings, meeting.id, { chat_id: chat.id }); } catch (_e) {}
+      }
+    }
+
+    if (!meeting.chat_id) return;
+
+    // Ensure owner is in chat_members so the chat appears in the chat list.
+    const current = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
+    if (current && current[0]) return;
+
+    const hasStatus = await chatMembersHasStatus();
+    if (hasStatus) {
+      await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id, role: 'owner', status: 'approved' });
+    } else {
+      await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id });
+    }
+  } catch (e) {
+    console.warn('ensureMeetingChat failed:', e);
+  }
 }
 

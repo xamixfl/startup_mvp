@@ -55,6 +55,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   startChatListPolling();
 });
 
+let __chatMembersHasStatus = null;
+async function chatMembersHasStatus() {
+  if (__chatMembersHasStatus !== null) return __chatMembersHasStatus;
+  try {
+    await api.get(TABLES.chat_members, { $limit: 1, status: 'approved' });
+    __chatMembersHasStatus = true;
+  } catch (_e) {
+    __chatMembersHasStatus = false;
+  }
+  return __chatMembersHasStatus;
+}
+
+async function safeInsertChatMember(data) {
+  try {
+    return await api.insert(TABLES.chat_members, data);
+  } catch (_e) {
+    return await api.insert(TABLES.chat_members, { chat_id: data.chat_id, user_id: data.user_id });
+  }
+}
+
+async function getOwnedChatsForUser(userId) {
+  try {
+    return await api.get(TABLES.chats, { owner_id: userId, $order: { column: 'created_at', ascending: false } });
+  } catch (_e) {
+    // Some schemas may use a different column name.
+    try {
+      return await api.get(TABLES.chats, { creator_id: userId, $order: { column: 'created_at', ascending: false } });
+    } catch (_e2) {
+      return [];
+    }
+  }
+}
+
 function setupChatSelectionFromUrl() {
   const chatId = new URLSearchParams(window.location.search).get('chat_id');
   if (chatId) {
@@ -109,27 +142,28 @@ async function loadChats(isRefresh = false) {
   if (!isRefresh) list.innerHTML = '<div class="chat-item">Загрузка...</div>';
 
   try {
-    const memberships = await api.get(TABLES.chat_members, {
-      user_id: currentUser.id,
-      status: 'approved'
-    });
+    const hasStatus = await chatMembersHasStatus();
+    let memberships = [];
+    try {
+      memberships = await api.get(TABLES.chat_members, hasStatus
+        ? { user_id: currentUser.id, status: 'approved' }
+        : { user_id: currentUser.id }
+      );
+    } catch (_e) {
+      memberships = [];
+    }
     const memberChatIds = (memberships || []).map(m => m.chat_id).filter(Boolean);
 
     // Ensure owner chats are present
-    const ownedChats = await api.get(TABLES.chats, {
-      owner_id: currentUser.id,
-      $order: { column: 'created_at', ascending: false }
-    });
+    const ownedChats = await getOwnedChatsForUser(currentUser.id);
     const ownedIds = (ownedChats || []).map(c => c.id).filter(Boolean);
     const missingOwner = ownedIds.filter(id => !memberChatIds.includes(id));
     for (const chatId of missingOwner) {
       try {
-        await api.insert(TABLES.chat_members, {
-          chat_id: chatId,
-          user_id: currentUser.id,
-          role: 'owner',
-          status: 'approved'
-        });
+        await safeInsertChatMember(hasStatus
+          ? { chat_id: chatId, user_id: currentUser.id, role: 'owner', status: 'approved' }
+          : { chat_id: chatId, user_id: currentUser.id }
+        );
         memberChatIds.push(chatId);
       } catch (_e) {
         // ignore
@@ -564,11 +598,18 @@ async function ensureDirectPeer(chat) {
     const members = await api.get(TABLES.chat_members, { chat_id: chat.id });
     const hasMe = (members || []).some(m => m.user_id === currentUser.id);
     const hasPeer = (members || []).some(m => m.user_id === chat.peer_id);
+    const hasStatus = await chatMembersHasStatus();
     if (!hasMe) {
-      await api.insert(TABLES.chat_members, { chat_id: chat.id, user_id: currentUser.id, role: 'owner', status: 'approved' });
+      await safeInsertChatMember(hasStatus
+        ? { chat_id: chat.id, user_id: currentUser.id, role: 'owner', status: 'approved' }
+        : { chat_id: chat.id, user_id: currentUser.id }
+      );
     }
     if (!hasPeer) {
-      await api.insert(TABLES.chat_members, { chat_id: chat.id, user_id: chat.peer_id, role: 'member', status: 'approved' });
+      await safeInsertChatMember(hasStatus
+        ? { chat_id: chat.id, user_id: chat.peer_id, role: 'member', status: 'approved' }
+        : { chat_id: chat.id, user_id: chat.peer_id }
+      );
     }
   } catch (_e) {
     // ignore

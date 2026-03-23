@@ -3,8 +3,21 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
 
-// Always load env from `server/.env` regardless of where node is started from.
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+// Env loading:
+// - Production server should keep using `server/.env`
+// - Local dev can create `server/.env.local` without touching production config
+// - Optional: set ENV_FILE to point to an explicit env file
+(() => {
+  const envDir = path.resolve(__dirname, '..');
+  const explicit = process.env.ENV_FILE;
+  const candidates = explicit
+    ? [path.isAbsolute(explicit) ? explicit : path.resolve(process.cwd(), explicit)]
+    : [path.join(envDir, '.env.local'), path.join(envDir, '.env')];
+
+  for (const p of candidates) {
+    dotenv.config({ path: p, override: false });
+  }
+})();
 
 const { selectRows, insertRow, updateRow, deleteRow, deleteWhere } = require('./query');
 const { createProfileUser, findProfileByEmail, createSession, deleteSession, setSessionCookie, clearSessionCookie, authMiddleware, requireAuth, updateProfile } = require('./auth');

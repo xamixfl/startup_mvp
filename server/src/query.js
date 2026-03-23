@@ -4,6 +4,12 @@ function isSafeIdentifier(value) {
   return typeof value === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value);
 }
 
+function isSafeTableName(value) {
+  // Allow dashes in table names (e.g. "table-connector"), but still restrict to a safe charset.
+  // Table names are always double-quoted in SQL below.
+  return typeof value === 'string' && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(value);
+}
+
 function isPlainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -117,7 +123,7 @@ function buildQueryParts(filters, params) {
 }
 
 async function selectRows(table, filters) {
-  if (!isSafeIdentifier(table)) throw new Error('Invalid table');
+  if (!isSafeTableName(table)) throw new Error('Invalid table');
   const params = [];
   const { whereSql, orderBy, limitSql } = buildQueryParts(filters, params);
   const sql = `SELECT * FROM "${table}"${whereSql}${orderBy}${limitSql}`;
@@ -126,7 +132,7 @@ async function selectRows(table, filters) {
 }
 
 async function insertRow(table, data) {
-  if (!isSafeIdentifier(table)) throw new Error('Invalid table');
+  if (!isSafeTableName(table)) throw new Error('Invalid table');
   if (!data || typeof data !== 'object') throw new Error('Invalid data');
   const keys = Object.keys(data).filter(k => data[k] !== undefined);
   if (keys.length === 0) throw new Error('Empty insert');
@@ -142,7 +148,7 @@ async function insertRow(table, data) {
 }
 
 async function updateRow(table, data) {
-  if (!isSafeIdentifier(table)) throw new Error('Invalid table');
+  if (!isSafeTableName(table)) throw new Error('Invalid table');
   if (!data || typeof data !== 'object') throw new Error('Invalid data');
   const { id, ...rest } = data;
   if (!id) throw new Error('Missing id');
@@ -163,7 +169,7 @@ async function updateRow(table, data) {
 }
 
 async function deleteRow(table, data) {
-  if (!isSafeIdentifier(table)) throw new Error('Invalid table');
+  if (!isSafeTableName(table)) throw new Error('Invalid table');
   const id = data && typeof data === 'object' ? data.id : null;
   if (!id) throw new Error('Missing id');
   const sql = `DELETE FROM "${table}" WHERE "id" = $1 RETURNING *`;
@@ -172,7 +178,7 @@ async function deleteRow(table, data) {
 }
 
 async function deleteWhere(table, filters) {
-  if (!isSafeIdentifier(table)) throw new Error('Invalid table');
+  if (!isSafeTableName(table)) throw new Error('Invalid table');
   const params = [];
   const { whereSql } = buildQueryParts(filters, params);
   if (!whereSql) throw new Error('Refusing delete without filters');

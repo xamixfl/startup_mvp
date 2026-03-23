@@ -85,7 +85,10 @@ function renderMeetings(filter) {
 
   let filteredMeetings = allMeetings;
   if (filter === 'owner') filteredMeetings = allMeetings.filter(m => m.role === 'owner');
-  if (filter === 'participant') filteredMeetings = allMeetings.filter(m => m.role === 'participant');
+  if (filter === 'participant') {
+    // "Участвую" should include meetings where the user participates, including meetings they created.
+    filteredMeetings = allMeetings.filter(m => m.role === 'participant' || m.role === 'owner');
+  }
 
   if (!filteredMeetings || filteredMeetings.length === 0) {
     let emptyMessage = 'Вы пока не участвуете ни в одной встрече';
@@ -267,4 +270,3 @@ window.leaveMeeting = async function (meetingId) {
     alert('Ошибка при выходе из встречи');
   }
 };
-

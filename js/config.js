@@ -5,7 +5,8 @@ window.APP = window.APP || {};
 window.APP.TABLES = {
   profiles: 'profiles',
   meetings: 'meetings',
-  participants: 'participants',
+  // Meeting participants are stored in "table-connector" on your current schema.
+  participants: 'table-connector',
   cities: 'cities',
   topics: 'topics',
   chats: 'chats',
@@ -16,4 +17,3 @@ window.APP.TABLES = {
   ban_appeals: 'ban_appeals',
   notifications: 'notifications'
 };
-

@@ -40,6 +40,9 @@ function setupExpiresInputs() {
   const timeSelect = document.getElementById('meeting-expires-time');
   if (!dateInput || !timeSelect) return;
 
+  const hintEl = document.getElementById('expires-hint');
+  if (hintEl) hintEl.textContent = `Можно выбрать только в пределах ${MAX_LIFETIME_HOURS} часов.`;
+
   const now = new Date();
   const max = new Date(now.getTime() + MAX_LIFETIME_HOURS * 60 * 60 * 1000);
   const todayStr = formatLocalDate(now);
@@ -203,24 +206,40 @@ async function createMeetingInDb(payload) {
     if (!meeting?.id) throw new Error('Meeting not created');
 
     // Link creator as participant
-    await api.insert(TABLES.participants, { meeting_id: meeting.id, user_id: currentUser.id });
+    try {
+      await api.insert(TABLES.participants, { meeting_id: meeting.id, user_id: currentUser.id });
+    } catch (e) {
+      // Meeting is already created. If participants insert fails due to schema/constraints,
+      // still redirect to the meeting page and let the user continue.
+      console.warn('Не удалось добавить создателя в участники (встреча создана):', e);
+    }
 
-    // Create chat for meeting
-    const chats = await api.insert(TABLES.chats, {
-      meeting_id: meeting.id,
-      title: meeting.title || payload.title,
-      owner_id: currentUser.id
-    });
-    const chat = Array.isArray(chats) ? chats[0] : chats;
-    if (chat?.id) {
-      await api.insert(TABLES.chat_members, { chat_id: chat.id, user_id: currentUser.id, role: 'owner', status: 'approved' });
-      await api.update(TABLES.meetings, meeting.id, { chat_id: chat.id });
+    // Create chat for meeting. If it fails, meeting must still be usable.
+    try {
+      const chats = await api.insert(TABLES.chats, {
+        meeting_id: meeting.id,
+        title: meeting.title || payload.title,
+        owner_id: currentUser.id
+      });
+      const chat = Array.isArray(chats) ? chats[0] : chats;
+      if (chat?.id) {
+        await api.insert(TABLES.chat_members, { chat_id: chat.id, user_id: currentUser.id, role: 'owner', status: 'approved' });
+        await api.update(TABLES.meetings, meeting.id, { chat_id: chat.id });
+      }
+    } catch (e) {
+      console.warn('Не удалось создать чат для встречи (встреча создана):', e);
     }
 
     showNotification('Встреча опубликована!');
-    setTimeout(() => {
-      window.location.href = `meeting.html?id=${meeting.id}`;
-    }, 600);
+
+    const targetUrl = `meeting.html?id=${meeting.id}`;
+    try {
+      localStorage.setItem('last_created_meeting_id', String(meeting.id));
+    } catch (_e) { /* ignore */ }
+
+    // Navigate ASAP; add a small fallback in case the first navigation is blocked by the browser for any reason.
+    setTimeout(() => window.location.assign(targetUrl), 50);
+    setTimeout(() => window.location.assign(targetUrl), 1500);
   } catch (error) {
     console.error('Ошибка создания встречи:', error);
     showNotification('Ошибка: ' + (error.message || 'Не удалось создать'));
@@ -302,4 +321,3 @@ async function loadMeetingForEdit(meetingId) {
     window.location.href = 'index.html';
   }
 }
-

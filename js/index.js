@@ -276,6 +276,25 @@ async function loadMeetings() {
     }
 
     const uniqueMeetings = Array.from(new Map(meetings.map(m => [m.id, m])).values());
+
+    // If user just created a meeting and returned to the feed, ensure it shows up.
+    // This also helps debug cases where the list query filters it out unexpectedly.
+    let lastCreatedId = null;
+    try {
+      lastCreatedId = localStorage.getItem('last_created_meeting_id');
+    } catch (_e) { /* ignore */ }
+    if (lastCreatedId && !uniqueMeetings.some(m => String(m.id) === String(lastCreatedId))) {
+      try {
+        const created = await api.getOne(TABLES.meetings, lastCreatedId);
+        if (created && created.expires_at && new Date(created.expires_at).toISOString() > nowIso) {
+          uniqueMeetings.unshift(created);
+        }
+      } catch (_e) { /* ignore */ }
+    }
+    try {
+      if (lastCreatedId) localStorage.removeItem('last_created_meeting_id');
+    } catch (_e) { /* ignore */ }
+
     const meetingsWithCreators = await attachCreators(uniqueMeetings);
     allMeetings = meetingsWithCreators;
     loadCityFilters();
@@ -725,4 +744,3 @@ function renderMeetingResult(meeting) {
   `;
   return item;
 }
-
