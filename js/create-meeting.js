@@ -205,6 +205,14 @@ async function createMeetingInDb(payload) {
     const meeting = Array.isArray(inserted) ? inserted[0] : inserted;
     if (!meeting?.id) throw new Error('Meeting not created');
 
+    // Extra safety: if something went wrong with the insert response, double-check that the meeting is readable.
+    try {
+      const check = await api.getOne(TABLES.meetings, meeting.id);
+      if (!check) throw new Error('not found after insert');
+    } catch (e) {
+      console.warn('Встреча создана, но не читается сразу после вставки:', e);
+    }
+
     // Link creator as participant
     try {
       await api.insert(TABLES.participants, { meeting_id: meeting.id, user_id: currentUser.id });

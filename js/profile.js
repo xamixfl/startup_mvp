@@ -71,13 +71,36 @@ function renderProfile(profile) {
     avatar.innerHTML = `<img src="${avatarUrl}" alt="${displayName}">`;
     const modal = document.getElementById('avatar-modal');
     const modalImg = document.getElementById('avatar-modal-img');
+    const modalClose = document.getElementById('avatar-modal-close');
+
+    const closeModal = () => {
+      if (!modal) return;
+      modal.style.display = 'none';
+      if (modalImg) modalImg.src = '';
+      document.removeEventListener('keydown', onKeydown);
+    };
+
+    const onKeydown = (e) => {
+      if (e.key === 'Escape') closeModal();
+    };
+
     avatar.onclick = () => {
       if (!modal || !modalImg) return;
       modalImg.src = avatarUrl;
       modal.style.display = 'flex';
+      document.addEventListener('keydown', onKeydown);
     };
     if (modal) {
-      modal.onclick = () => { modal.style.display = 'none'; };
+      modal.onclick = (e) => {
+        // Close only when clicking the overlay, not the image itself.
+        if (e.target === modal) closeModal();
+      };
+    }
+    if (modalClose) {
+      modalClose.onclick = (e) => {
+        e.stopPropagation();
+        closeModal();
+      };
     }
   }
 
@@ -625,4 +648,3 @@ async function handleLogout() {
   }
   window.location.href = 'index.html';
 }
-

@@ -227,18 +227,51 @@
             background: #a7f3d0;
             border-color: #6ee7b7;
         }
+
+        .avatar-modal {
             position: fixed;
             inset: 0;
-            background: rgba(15, 23, 42, 0.6);
+            background: rgba(15, 23, 42, 0.65);
             display: none;
             align-items: center;
             justify-content: center;
             z-index: 2000;
+            padding: 20px;
+        }
+
+        .avatar-modal-inner {
+            position: relative;
+            max-width: min(920px, 92vw);
+            max-height: 92vh;
+        }
+
+        .avatar-modal-close {
+            position: absolute;
+            top: -14px;
+            right: -14px;
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            background: rgba(255, 255, 255, 0.95);
+            color: #0f172a;
+            font-size: 22px;
+            font-weight: 800;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
+        }
+
+        .avatar-modal-close:hover {
+            background: white;
         }
 
         .avatar-modal img {
-            max-width: 90vw;
-            max-height: 90vh;
+            display: block;
+            max-width: 100%;
+            max-height: 92vh;
             border-radius: 16px;
             background: white;
             padding: 6px;
@@ -637,7 +670,10 @@
     </div>
 
     <div id="avatar-modal" class="avatar-modal">
-        <img id="avatar-modal-img" src="" alt="Фото профиля">
+        <div class="avatar-modal-inner" role="dialog" aria-label="Просмотр фото профиля">
+            <button type="button" class="avatar-modal-close" id="avatar-modal-close" aria-label="Закрыть">×</button>
+            <img id="avatar-modal-img" src="" alt="">
+        </div>
     </div>
 
     <div id="edit-modal" class="modal-edit">
@@ -708,7 +744,7 @@
     <script src="js/utils.js"></script>
     <script src="js/reports-bans.js"></script>
     <script src="js/reporting.js"></script>
-    <script src="js/profile.js"></script>
+    <script src="js/profile.js?v=20260324"></script>
 </body>
 
 </html>
