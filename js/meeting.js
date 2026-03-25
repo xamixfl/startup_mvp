@@ -77,7 +77,7 @@ function renderMeeting(meeting, _user) {
     : DEFAULT_AVATAR;
 
   const avatarEl = document.getElementById('creator-avatar');
-  if (avatarEl) avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${creatorName}">`;
+  if (avatarEl) avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${creatorName}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">`;
 
   const creatorLink = document.getElementById('creator-name');
   if (creatorLink) {

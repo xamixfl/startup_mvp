@@ -88,7 +88,7 @@ function updateUserUI(user) {
       const avatarUrl = currentProfile?.photo_URL && currentProfile?.photo_URL !== 'user'
         ? currentProfile.photo_URL
         : DEFAULT_AVATAR;
-      userAvatar.innerHTML = `<img src="${avatarUrl}" alt="${userName ? userName.textContent : ''}">`;
+      userAvatar.innerHTML = `<img src="${avatarUrl}" alt="${userName ? userName.textContent : ''}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">`;
       userAvatar.className = 'user-avatar authenticated';
     }
     if (createBtn) createBtn.href = 'create-meeting.html';
@@ -353,9 +353,9 @@ function renderMeetings(meetings) {
       <div class="meeting-meta">
         <div class="participants-pill">👥 ${participantsCount}/${meeting.max_slots}</div>
         <div class="creator-block">
-          <div class="creator-avatar">
-            <img src="${creatorAvatar}" alt="${creatorName}">
-          </div>
+           <div class="creator-avatar">
+             <img src="${creatorAvatar}" alt="${creatorName}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
+           </div>
           <div>
             <div class="creator-name">${creatorName}</div>
             <div class="creator-age">${creatorAge}</div>
@@ -722,7 +722,7 @@ function renderProfileResult(profile) {
   const age = profile.age ? `${profile.age} лет` : '';
 
   item.innerHTML = `
-    <div class="search-avatar"><img src="${avatarUrl}" alt="${name}"></div>
+    <div class="search-avatar"><img src="${avatarUrl}" alt="${name}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';"></div>
     <div>
       <div class="search-title">${name}</div>
       <div class="search-subtitle">${age}</div>

@@ -372,7 +372,7 @@ function renderMessage(msg, profile, mine) {
 
   wrap.innerHTML = `
     <div class="message-meta">
-      <div class="message-avatar"><img src="${avatarUrl}" alt="${escapeHtml(senderName)}"></div>
+      <div class="message-avatar"><img src="${avatarUrl}" alt="${escapeHtml(senderName)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';"></div>
       <div class="message-sender">${escapeHtml(senderName)}</div>
       <div class="message-time">${escapeHtml(when)}</div>
     </div>

@@ -179,14 +179,14 @@ function createMeetingCard(meeting) {
     <div class="meeting-footer">
       <div class="creator-info">
         <div class="creator-avatar">
-          <img src="${creatorAvatar}" alt="${creatorName}">
+          <img src="${creatorAvatar}" alt="${creatorName}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
         </div>
         <div class="creator-name">${creatorName}</div>
       </div>
       ${meeting.role === 'owner' ? `<button class="meeting-menu-btn" type="button">⋮</button>` : ''}
     </div>
     ${meeting.role === 'owner' ? `<div class="meeting-menu" data-meeting-id="${meeting.id}">${menuItems}</div>` : ''}
-    <button class="btn-report-card" data-meeting-id="${meeting.id}">⚠️ Пожаловаться</button>
+    ${meeting.role === 'owner' ? '' : `<button class="btn-report-card" data-meeting-id="${meeting.id}">⚠️ Пожаловаться</button>`}
   `;
 
   card.onclick = (e) => {

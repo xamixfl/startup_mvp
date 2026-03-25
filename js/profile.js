@@ -68,7 +68,7 @@ function renderProfile(profile) {
     : DEFAULT_AVATAR;
 
   if (avatar) {
-    avatar.innerHTML = `<img src="${avatarUrl}" alt="${displayName}">`;
+    avatar.innerHTML = `<img src="${avatarUrl}" alt="${displayName}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">`;
     const modal = document.getElementById('avatar-modal');
     const modalImg = document.getElementById('avatar-modal-img');
     const modalClose = document.getElementById('avatar-modal-close');
