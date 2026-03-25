@@ -59,8 +59,33 @@ async function deleteExpiredMeeting(meetingId) {
   }
 }
 
+async function createUserNotification(recipientId, payload = {}) {
+  const { TABLES } = window.APP || {};
+  if (!recipientId || !TABLES?.notifications) return null;
+
+  const notification = {
+    admin_profile_id: recipientId,
+    notification_type: payload.notification_type || 'event_update',
+    related_table: payload.related_table || 'meetings',
+    related_id: payload.related_id,
+    title: payload.title || 'Обновление по встрече',
+    message: payload.message || ''
+  };
+
+  if (!notification.related_id) return null;
+
+  try {
+    const rows = await api.insert(TABLES.notifications, notification);
+    return Array.isArray(rows) ? rows[0] || null : null;
+  } catch (error) {
+    console.error('Error creating user notification:', error);
+    return null;
+  }
+}
+
 window.fetchTopics = fetchTopics;
 window.getCurrentUser = getCurrentUser;
 window.cleanupExpiredMeetings = cleanupExpiredMeetings;
 window.deleteExpiredMeeting = deleteExpiredMeeting;
+window.createUserNotification = createUserNotification;
 

@@ -72,6 +72,12 @@ web_modules/
 server/.env
 server/uploads/
 
+# Local-only workspace files
+.local/
+*.local.cmd
+*.local.ps1
+*.local.bat
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

@@ -635,6 +635,134 @@
             border-color: #2563eb;
             color: white;
         }
+
+        .interest-selector {
+            position: relative;
+            margin-top: 8px;
+        }
+
+        .interest-selector-trigger {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            background: white;
+            color: #0f172a;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .interest-selector-trigger:hover,
+        .interest-selector-trigger.open {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .interest-selector-trigger-text {
+            text-align: left;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .interest-selector-trigger-icon {
+            color: #64748b;
+            font-size: 12px;
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .interest-selector-trigger.open .interest-selector-trigger-icon {
+            transform: rotate(180deg);
+        }
+
+        .interest-selector-menu {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            right: 0;
+            display: none;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            background: white;
+            box-shadow: 0 16px 30px rgba(15, 23, 42, 0.14);
+            z-index: 30;
+        }
+
+        .interest-selector-menu.open {
+            display: block;
+        }
+
+        .interest-selector-search {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .interest-selector-search:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .interest-selector-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            max-height: 220px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .interest-selector-empty {
+            display: none;
+            padding: 10px 8px 4px;
+            color: #64748b;
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .edit-selected-interests {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-height: 28px;
+            margin-top: 8px;
+        }
+
+        .edit-selected-interest-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border: none;
+            border-radius: 999px;
+            background: #e2e8f0;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .edit-selected-interest-pill:hover {
+            background: #cbd5e1;
+            color: #0f172a;
+        }
+
+        .edit-selected-interest-pill::after {
+            content: ' ×';
+            font-weight: 700;
+        }
     </style>
 </head>
 
@@ -722,8 +850,18 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Интересы</label>
-                    <div id="edit-interests-container"
-                        style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
+                    <div class="edit-selected-interests" id="edit-selected-interests"></div>
+                    <div class="interest-selector" id="edit-interest-selector">
+                        <button type="button" class="interest-selector-trigger" id="edit-interest-trigger" aria-expanded="false">
+                            <span class="interest-selector-trigger-text" id="edit-interest-trigger-text">Выберите интересы</span>
+                            <span class="interest-selector-trigger-icon">▼</span>
+                        </button>
+                        <div class="interest-selector-menu" id="edit-interest-menu">
+                            <input type="text" id="edit-interest-search" class="interest-selector-search" placeholder="Поиск интересов...">
+                            <div id="edit-interests-container" class="interest-selector-list"></div>
+                            <div id="edit-interest-empty" class="interest-selector-empty">Ничего не найдено</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-actions">
                     <button type="submit" class="btn-save">Сохранить</button>
@@ -739,7 +877,6 @@
     </footer>
 
     <script src="js/api.js"></script>
-    <script src="env.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/reports-bans.js"></script>

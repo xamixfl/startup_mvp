@@ -396,7 +396,14 @@ async function loadMessages(chatId, opts = {}) {
     const profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
     const byId = new Map((profiles || []).map(p => [p.id, p]));
 
+    let previousMessageDateKey = null;
     (messages || []).forEach(msg => {
+      const messageDateKey = getMessageDateKey(msg.created_at);
+      if (messageDateKey && messageDateKey !== previousMessageDateKey) {
+        body.appendChild(renderDateSeparator(msg.created_at));
+        previousMessageDateKey = messageDateKey;
+      }
+
       const mine = msg.user_id === currentUser.id;
       const p = byId.get(msg.user_id);
       body.appendChild(renderMessage(msg, p, mine));
@@ -427,15 +434,19 @@ function renderMessage(msg, profile, mine) {
 
   const avatarUrl = profile?.photo_URL && profile.photo_URL !== 'user' ? profile.photo_URL : DEFAULT_AVATAR;
 
-  const when = msg.created_at ? new Date(msg.created_at).toLocaleString() : '';
+  const fullWhen = formatMessageDateTime(msg.created_at);
+  const shortWhen = formatMessageTime(msg.created_at);
+  const metaHtml = mine
+    ? `<div class="message-sender">${escapeHtml(senderName)}</div>`
+    : `<div class="message-avatar"><img src="${avatarUrl}" alt="${escapeHtml(senderName)}"></div>
+      <div class="message-sender">${escapeHtml(senderName)}</div>`;
 
   wrap.innerHTML = `
     <div class="message-meta">
-      <div class="message-avatar"><img src="${avatarUrl}" alt="${escapeHtml(senderName)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';"></div>
-      <div class="message-sender">${escapeHtml(senderName)}</div>
-      <div class="message-time">${escapeHtml(when)}</div>
+    ${metaHtml}
     </div>
     <div class="message-content"></div>
+    <div class="message-time" title="${escapeHtml(fullWhen)}">${escapeHtml(shortWhen)}</div>
   `;
 
   const contentEl = wrap.querySelector('.message-content');
@@ -452,6 +463,68 @@ function renderMessage(msg, profile, mine) {
   }
 
   return wrap;
+}
+
+function renderDateSeparator(isoString) {
+  const el = document.createElement('div');
+  el.className = 'message-date-separator';
+  el.textContent = formatMessageDayLabel(isoString);
+  return el;
+}
+
+function getMessageDateKey(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  return [date.getFullYear(), date.getMonth(), date.getDate()].join('-');
+}
+
+function formatMessageTime(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function formatMessageDateTime(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function formatMessageDayLabel(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (isSameCalendarDay(date, today)) return 'Сегодня';
+  if (isSameCalendarDay(date, yesterday)) return 'Вчера';
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    weekday: 'long'
+  }).format(date);
+}
+
+function isSameCalendarDay(a, b) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
 }
 
 function markChatRead(chatId, createdAt) {

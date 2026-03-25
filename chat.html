@@ -209,12 +209,14 @@
     }
 
     .message {
+      position: relative;
       max-width: 70%;
-      padding: 10px 12px;
+      padding: 10px 12px 24px;
       border-radius: 12px;
       background: white;
       border: 1px solid #e2e8f0;
       align-self: flex-start;
+      box-shadow: 0 8px 24px rgba(148, 163, 184, 0.08);
     }
 
     .message.mine {
@@ -228,6 +230,11 @@
       align-items: center;
       gap: 8px;
       margin-bottom: 6px;
+      min-height: 28px;
+    }
+
+    .message.mine .message-meta {
+      justify-content: flex-end;
     }
 
     .message-avatar {
@@ -257,20 +264,43 @@
       white-space: nowrap;
     }
 
-    .message-time {
-      margin-left: auto;
-      font-size: 11px;
-      color: #94a3b8;
-      flex: 0 0 auto;
-      white-space: nowrap;
-    }
-
     .message-content {
       font-size: 14px;
       color: #0f172a;
       line-height: 1.4;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+    }
+
+    .message-time {
+      position: absolute;
+      right: 12px;
+      bottom: 8px;
+      font-size: 11px;
+      color: #64748b;
+      opacity: 0.9;
+      letter-spacing: 0.01em;
+    }
+
+    .message.mine .message-time {
+      color: #475569;
+    }
+
+    .message-date-separator {
+      align-self: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.84);
+      border: 1px solid #dbe4f0;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 6px 18px rgba(148, 163, 184, 0.14);
+      margin: 6px auto 2px;
+      backdrop-filter: blur(10px);
     }
 
     .message-author {
@@ -693,7 +723,6 @@
   </div>
 
   <script src="js/api.js"></script>
-    <script src="env.js"></script>
   <script src="js/config.js"></script>
   <script src="js/utils.js"></script>
   <script src="js/reports-bans.js"></script>

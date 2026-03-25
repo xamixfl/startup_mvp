@@ -1,5 +1,4 @@
-// DB table names used by the frontend.
-// Supabase client was removed in favor of `js/api.js` + local Node/Express API.
+// DB table names used by the frontend local API client.
 
 window.APP = window.APP || {};
 window.APP.TABLES = {

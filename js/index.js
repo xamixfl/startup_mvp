@@ -10,6 +10,12 @@ let TOPICS = [];
 const selectedTopics = new Set();
 const selectedCities = new Set();
 let allCities = [];
+const PARTICIPATION_NOTIFICATION_TYPES = [
+  'event_join_request',
+  'event_join_approved',
+  'event_join_rejected',
+  'event_joined_direct'
+];
 
 const BASE_CITIES = [
   'Москва',
@@ -97,6 +103,7 @@ function updateUserUI(user) {
       userLink.style.cursor = 'pointer';
     }
     startChatBadgePolling();
+    startMyEventsBadgePolling();
   } else {
     if (authButton) {
       authButton.style.display = 'flex';
@@ -117,6 +124,7 @@ function updateUserUI(user) {
       userLink.onclick = (e) => e.preventDefault();
     }
     stopChatBadgePolling();
+    stopMyEventsBadgePolling();
   }
 }
 
@@ -154,7 +162,7 @@ function loadFilters() {
     container.appendChild(item);
   });
 
-  updateFilterLabel();
+  updateTopicFilterUI();
 }
 
 function filterTopicList(searchTerm) {
@@ -403,24 +411,18 @@ function filterMeetings(topicId, event) {
     else selectedTopics.add(topicId);
   }
 
-  setActiveFilterButton(topicId);
-  updateFilterLabel();
+  updateTopicFilterUI();
   renderFilteredMeetings();
 }
 
-function setActiveFilterButton(topicId) {
-  document.querySelectorAll('#filter-tags .filter-tag').forEach(btn => btn.classList.remove('active'));
-
-  if (topicId === 'all') {
-    const allButton = document.querySelector('#filter-tags .filter-tag:first-of-type');
-    if (allButton) allButton.classList.add('active');
-    return;
-  }
-
-  const topic = TOPICS.find(t => t.id === topicId);
-  if (!topic) return;
+function setActiveFilterButtons() {
   document.querySelectorAll('#filter-tags .filter-tag').forEach(btn => {
-    if (btn.textContent === topic.name) btn.classList.add('active');
+    const topicId = btn.getAttribute('data-topic-id');
+    if (!topicId) {
+      btn.classList.toggle('active', selectedTopics.size === 0);
+      return;
+    }
+    btn.classList.toggle('active', selectedTopics.has(topicId));
   });
 }
 
@@ -451,15 +453,54 @@ function renderFilteredMeetings() {
 function updateFilterLabel() {
   const label = document.querySelector('.filter-current');
   if (!label) return;
+  label.innerHTML = '';
 
   if (selectedTopics.size === 0) {
-    label.textContent = 'Все категории';
+    const pill = document.createElement('div');
+    pill.className = 'selected-topic-pill static';
+    pill.textContent = 'Все интересы';
+    label.appendChild(pill);
     return;
   }
 
-  const names = TOPICS.filter(topic => selectedTopics.has(topic.id))
-    .map(topic => topic.name.replace(/^\S+\s/, ''));
-  label.textContent = names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+  TOPICS.filter(topic => selectedTopics.has(topic.id)).forEach(topic => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'selected-topic-pill';
+    pill.textContent = topic.name.replace(/^\S+\s/, '');
+    pill.addEventListener('click', () => removeSelectedTopic(topic.id));
+    label.appendChild(pill);
+  });
+}
+
+function renderSelectedTopicPills() {
+  const container = document.getElementById('selected-topic-pills');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (selectedTopics.size === 0) return;
+
+  TOPICS.filter(topic => selectedTopics.has(topic.id)).forEach(topic => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'selected-topic-pill';
+    pill.textContent = topic.name.replace(/^\S+\s/, '');
+    pill.addEventListener('click', () => removeSelectedTopic(topic.id));
+    container.appendChild(pill);
+  });
+}
+
+function removeSelectedTopic(topicId) {
+  if (!selectedTopics.has(topicId)) return;
+  selectedTopics.delete(topicId);
+  updateTopicFilterUI();
+  renderFilteredMeetings();
+}
+
+function updateTopicFilterUI() {
+  setActiveFilterButtons();
+  updateFilterLabel();
+  renderSelectedTopicPills();
 }
 
 async function joinMeeting(meetingId) {
@@ -551,6 +592,17 @@ async function joinMeeting(meetingId) {
     await api.insert(TABLES.participants, { meeting_id: meetingId, user_id: currentUser.id });
     await api.update(TABLES.meetings, meetingId, { current_slots: (meeting.current_slots || 0) + 1 });
 
+    if (meeting.creator_id && meeting.creator_id !== currentUser.id && typeof window.createUserNotification === 'function') {
+      const senderName = currentProfile?.full_name || currentProfile?.username || currentUser.email || 'Пользователь';
+      await window.createUserNotification(meeting.creator_id, {
+        notification_type: 'event_joined_direct',
+        related_table: 'meetings',
+        related_id: meetingId,
+        title: 'Новый участник встречи',
+        message: `${senderName} присоединился к встрече «${meeting.title || 'Встреча'}».`
+      });
+    }
+
     showNotification('Вы присоединились к встрече!');
     loadMeetings();
   } catch (error) {
@@ -588,6 +640,7 @@ window.joinMeeting = joinMeeting;
 window.filterMeetings = filterMeetings;
 
 let chatBadgeInterval = null;
+let myEventsBadgeInterval = null;
 
 async function updateChatBadge() {
   const badge = document.getElementById('chat-badge');
@@ -648,6 +701,43 @@ function stopChatBadgePolling() {
     chatBadgeInterval = null;
   }
   const badge = document.getElementById('chat-badge');
+  if (badge) badge.style.display = 'none';
+}
+
+async function updateMyEventsBadge() {
+  const badge = document.getElementById('my-events-badge');
+  if (!badge || !currentUser) return;
+
+  try {
+    const result = await api.query(TABLES.notifications, 'count', {}, {
+      admin_profile_id: currentUser.id,
+      is_read: false,
+      notification_type: { in: PARTICIPATION_NOTIFICATION_TYPES }
+    });
+    const total = Number(result && result.count) || 0;
+    if (total > 0) {
+      badge.textContent = total > 99 ? '99+' : String(total);
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (_e) {
+    badge.style.display = 'none';
+  }
+}
+
+function startMyEventsBadgePolling() {
+  updateMyEventsBadge();
+  if (myEventsBadgeInterval) clearInterval(myEventsBadgeInterval);
+  myEventsBadgeInterval = setInterval(updateMyEventsBadge, 30000);
+}
+
+function stopMyEventsBadgePolling() {
+  if (myEventsBadgeInterval) {
+    clearInterval(myEventsBadgeInterval);
+    myEventsBadgeInterval = null;
+  }
+  const badge = document.getElementById('my-events-badge');
   if (badge) badge.style.display = 'none';
 }
 

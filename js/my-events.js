@@ -5,6 +5,15 @@ let currentUser = null;
 let allMeetings = [];
 let TOPICS = [];
 let currentFilter = 'all';
+let participationNotifications = [];
+let notificationsPollTimer = null;
+
+const PARTICIPATION_NOTIFICATION_TYPES = new Set([
+  'event_join_request',
+  'event_join_approved',
+  'event_join_rejected',
+  'event_joined_direct'
+]);
 
 document.addEventListener('DOMContentLoaded', async () => {
   currentUser = await window.getCurrentUser();
@@ -16,7 +25,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
   await window.cleanupExpiredMeetings();
   await loadMeetings();
+  await loadParticipationNotifications();
   setupTabs();
+  setupNotificationActions();
+  startNotificationsPolling();
 });
 
 async function loadMeetings() {
@@ -58,12 +70,14 @@ async function loadMeetings() {
 
     // Participation can be stored either in TABLES.participants (legacy "table-connector")
     // or via chat membership (chat_members -> chats.meeting_id).
-    let participantMeetingIds = [];
+    const participantMeetingIds = new Set();
     try {
       const participantRows = await api.get(TABLES.participants, { user_id: currentUser.id });
-      participantMeetingIds = (participantRows || []).map(p => p.meeting_id).filter(Boolean);
+      (participantRows || []).forEach(item => {
+        if (item?.meeting_id) participantMeetingIds.add(item.meeting_id);
+      });
     } catch (_e) {
-      participantMeetingIds = [];
+      // ignore
     }
 
     try {
@@ -75,16 +89,17 @@ async function loadMeetings() {
       const chatIds = Array.from(new Set((memberships || []).map(m => m.chat_id).filter(Boolean)));
       if (chatIds.length > 0) {
         const chatsRows = await api.get(TABLES.chats, { id: { in: chatIds } });
-        const meetingIds = (chatsRows || []).map(c => c.meeting_id).filter(Boolean);
-        participantMeetingIds = Array.from(new Set([...participantMeetingIds, ...meetingIds]));
+        (chatsRows || []).forEach(chat => {
+          if (chat?.meeting_id) participantMeetingIds.add(chat.meeting_id);
+        });
       }
     } catch (_e) {
       // ignore
     }
 
     let participantMeetings = [];
-    if (participantMeetingIds.length > 0) {
-      participantMeetings = await safeGetMeetings({ id: { in: participantMeetingIds } });
+    if (participantMeetingIds.size > 0) {
+      participantMeetings = await safeGetMeetings({ id: { in: Array.from(participantMeetingIds) } });
     }
 
     // Merge + dedupe by meeting id (can happen when creator is also listed as participant).
@@ -129,6 +144,161 @@ function setupTabs() {
       renderMeetings(currentFilter);
     });
   });
+}
+
+function setupNotificationActions() {
+  const markAllBtn = document.getElementById('notifications-mark-all');
+  if (!markAllBtn) return;
+
+  markAllBtn.onclick = async () => {
+    const unread = participationNotifications.filter(item => !item.is_read);
+    if (unread.length === 0) return;
+
+    await Promise.all(unread.map(item => markNotificationRead(item.id)));
+    await loadParticipationNotifications();
+  };
+}
+
+function startNotificationsPolling() {
+  if (notificationsPollTimer) clearInterval(notificationsPollTimer);
+  notificationsPollTimer = setInterval(async () => {
+    if (!currentUser) return;
+    await loadParticipationNotifications(true);
+  }, 15000);
+}
+
+async function loadParticipationNotifications(silent = false) {
+  if (!currentUser) return;
+
+  try {
+    const rows = await api.get(TABLES.notifications, {
+      admin_profile_id: currentUser.id,
+      $order: { column: 'created_at', ascending: false },
+      $limit: 20
+    });
+    participationNotifications = (rows || []).filter(item => PARTICIPATION_NOTIFICATION_TYPES.has(item.notification_type));
+    renderParticipationNotifications();
+  } catch (error) {
+    console.error('Ошибка загрузки уведомлений:', error);
+    if (!silent) renderNotificationsError();
+  }
+}
+
+function renderParticipationNotifications() {
+  const list = document.getElementById('notifications-list');
+  const markAllBtn = document.getElementById('notifications-mark-all');
+  if (!list || !markAllBtn) return;
+
+  const unreadCount = participationNotifications.filter(item => !item.is_read).length;
+  markAllBtn.disabled = unreadCount === 0;
+
+  if (participationNotifications.length === 0) {
+    list.innerHTML = '<div class="notifications-empty">Пока нет уведомлений по участию во встречах.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  participationNotifications.forEach(notification => {
+    const item = document.createElement('div');
+    item.className = `notification-item${notification.is_read ? '' : ' unread'}`;
+    item.innerHTML = `
+      <div class="notification-main">
+        <div class="notification-meta">
+          <span class="notification-pill">${escapeHtml(getNotificationTypeLabel(notification.notification_type))}</span>
+          <span class="notification-time">${escapeHtml(formatNotificationTime(notification.created_at))}</span>
+        </div>
+        <div class="notification-heading">${escapeHtml(notification.title || 'Обновление по встрече')}</div>
+        <div class="notification-message">${escapeHtml(notification.message || '')}</div>
+      </div>
+      <div class="notification-actions">
+        <button type="button" class="notification-open-btn">Открыть</button>
+        ${notification.is_read ? '' : '<button type="button" class="notification-read-btn">Прочитано</button>'}
+      </div>
+    `;
+
+    const openBtn = item.querySelector('.notification-open-btn');
+    if (openBtn) {
+      openBtn.onclick = async () => {
+        await handleNotificationOpen(notification);
+      };
+    }
+
+    const readBtn = item.querySelector('.notification-read-btn');
+    if (readBtn) {
+      readBtn.onclick = async () => {
+        await markNotificationRead(notification.id);
+        await loadParticipationNotifications(true);
+      };
+    }
+
+    list.appendChild(item);
+  });
+}
+
+function renderNotificationsError() {
+  const list = document.getElementById('notifications-list');
+  if (!list) return;
+  list.innerHTML = '<div class="notifications-empty">Не удалось загрузить уведомления.</div>';
+}
+
+async function handleNotificationOpen(notification) {
+  if (!notification) return;
+  if (!notification.is_read) await markNotificationRead(notification.id);
+  if (notification.related_table === 'meetings' && notification.related_id) {
+    window.location.href = `meeting.html?id=${notification.related_id}`;
+    return;
+  }
+  await loadParticipationNotifications(true);
+}
+
+async function markNotificationRead(notificationId) {
+  if (!notificationId) return null;
+  try {
+    const rows = await api.update(TABLES.notifications, notificationId, {
+      is_read: true,
+      read_at: new Date().toISOString()
+    });
+    return Array.isArray(rows) ? rows[0] || null : null;
+  } catch (error) {
+    console.error('Ошибка отметки уведомления:', error);
+    return null;
+  }
+}
+
+function getNotificationTypeLabel(type) {
+  switch (type) {
+    case 'event_join_request':
+      return 'Новая заявка';
+    case 'event_join_approved':
+      return 'Одобрено';
+    case 'event_join_rejected':
+      return 'Отклонено';
+    case 'event_joined_direct':
+      return 'Новый участник';
+    default:
+      return 'Уведомление';
+  }
+}
+
+function formatNotificationTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function renderMeetings(filter) {

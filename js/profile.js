@@ -3,6 +3,7 @@ let TOPICS = [];
 let currentUser = null;
 let viewedProfile = null;
 let isCurrentUserAdmin = false;
+let editInterestMenuOpen = false;
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
 
@@ -552,6 +553,7 @@ function openEditModal() {
   }
 
   renderEditInterests();
+  setupEditInterestsDropdown();
   setupEditPhotoPreview();
   setupEditFormSubmit();
 
@@ -590,6 +592,115 @@ function renderEditInterests() {
     wrapper.appendChild(label);
     container.appendChild(wrapper);
   });
+
+  container.onchange = () => updateEditSelectedInterests();
+  updateEditSelectedInterests();
+  filterEditInterestsList(document.getElementById('edit-interest-search')?.value || '');
+}
+
+function setupEditInterestsDropdown() {
+  const selector = document.getElementById('edit-interest-selector');
+  const trigger = document.getElementById('edit-interest-trigger');
+  const search = document.getElementById('edit-interest-search');
+  if (!selector || !trigger || !search) return;
+
+  if (!selector.dataset.bound) {
+    trigger.addEventListener('click', () => {
+      if (editInterestMenuOpen) closeEditInterestsMenu();
+      else openEditInterestsMenu();
+    });
+
+    search.addEventListener('input', e => filterEditInterestsList(e.target.value));
+
+    document.addEventListener('click', e => {
+      if (!selector.contains(e.target)) closeEditInterestsMenu();
+    });
+
+    selector.dataset.bound = 'true';
+  }
+
+  closeEditInterestsMenu();
+}
+
+function openEditInterestsMenu() {
+  const trigger = document.getElementById('edit-interest-trigger');
+  const menu = document.getElementById('edit-interest-menu');
+  const search = document.getElementById('edit-interest-search');
+  if (!trigger || !menu) return;
+
+  editInterestMenuOpen = true;
+  trigger.classList.add('open');
+  trigger.setAttribute('aria-expanded', 'true');
+  menu.classList.add('open');
+
+  if (search) {
+    search.focus();
+    filterEditInterestsList(search.value || '');
+  }
+}
+
+function closeEditInterestsMenu() {
+  const trigger = document.getElementById('edit-interest-trigger');
+  const menu = document.getElementById('edit-interest-menu');
+  const empty = document.getElementById('edit-interest-empty');
+  if (!trigger || !menu) return;
+
+  editInterestMenuOpen = false;
+  trigger.classList.remove('open');
+  trigger.setAttribute('aria-expanded', 'false');
+  menu.classList.remove('open');
+  if (empty) empty.style.display = 'none';
+}
+
+function filterEditInterestsList(query) {
+  const container = document.getElementById('edit-interests-container');
+  const empty = document.getElementById('edit-interest-empty');
+  if (!container) return;
+
+  const normalized = String(query || '').trim().toLowerCase();
+  let visible = 0;
+  container.querySelectorAll('.interest-checkbox-wrapper').forEach(item => {
+    const text = (item.textContent || '').toLowerCase();
+    const matches = !normalized || text.includes(normalized);
+    item.style.display = matches ? 'inline-flex' : 'none';
+    if (matches) visible += 1;
+  });
+
+  if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
+}
+
+function updateEditSelectedInterests() {
+  const selectedIds = Array.from(document.querySelectorAll('#edit-interests-container input[type="checkbox"]:checked'))
+    .map(input => input.value);
+
+  const pills = document.getElementById('edit-selected-interests');
+  const triggerText = document.getElementById('edit-interest-trigger-text');
+  if (pills) pills.innerHTML = '';
+
+  if (selectedIds.length === 0) {
+    if (triggerText) triggerText.textContent = 'Выберите интересы';
+    return;
+  }
+
+  if (triggerText) triggerText.textContent = `Выбрано: ${selectedIds.length}`;
+  if (!pills) return;
+
+  selectedIds.forEach(id => {
+    const topic = TOPICS.find(item => String(item.id) === String(id));
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'edit-selected-interest-pill';
+    pill.textContent = topic?.name || id;
+    pill.addEventListener('click', () => removeEditSelectedInterest(id));
+    pills.appendChild(pill);
+  });
+}
+
+function removeEditSelectedInterest(id) {
+  const checkbox = document.querySelector(`#edit-interests-container input[value="${CSS.escape(String(id))}"]`);
+  if (!checkbox) return;
+  checkbox.checked = false;
+  updateEditSelectedInterests();
 }
 
 function setupEditPhotoPreview() {

@@ -190,11 +190,20 @@ function updateSelectedCategoriesLabel() {
   selected.forEach(id => {
     const item = CATEGORIES.find(c => String(c.id) === String(id));
     const name = item?.name ? item.name.replace(/^(\S+)\s+/, '') : id;
-    const pill = document.createElement('div');
+    const pill = document.createElement('button');
+    pill.type = 'button';
     pill.className = 'selected-interest-pill';
     pill.textContent = name;
+    pill.addEventListener('click', () => removeSelectedCategory(id));
     pills.appendChild(pill);
   });
+}
+
+function removeSelectedCategory(id) {
+  const checkbox = document.querySelector(`.category-checkbox[value="${CSS.escape(String(id))}"]`);
+  if (!checkbox) return;
+  checkbox.checked = false;
+  updateSelectedCategoriesLabel();
 }
 
 async function validateStep1() {

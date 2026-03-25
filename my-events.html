@@ -80,6 +80,194 @@
             border-bottom: 2px solid #e2e8f0;
         }
 
+        .notifications-panel {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 18px;
+            padding: 20px 22px;
+            margin-bottom: 28px;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+        }
+
+        .notifications-panel[hidden] {
+            display: none;
+        }
+
+        .notifications-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .notifications-title-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .notifications-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .notifications-badge {
+            min-width: 22px;
+            height: 22px;
+            padding: 0 7px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #ef4444;
+            color: white;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .notifications-subtitle {
+            font-size: 14px;
+            color: #64748b;
+        }
+
+        .notifications-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .notifications-action-btn {
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            color: #334155;
+            border-radius: 10px;
+            padding: 9px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .notifications-action-btn:hover {
+            border-color: #cbd5e1;
+            background: #f1f5f9;
+        }
+
+        .notifications-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .notification-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 14px;
+            padding: 14px 16px;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            background: #f8fafc;
+        }
+
+        .notification-item.unread {
+            border-color: #fca5a5;
+            background: #fff7f7;
+        }
+
+        .notification-main {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .notification-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .notification-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .notification-item.unread .notification-pill {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+
+        .notification-time {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .notification-heading {
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .notification-message {
+            font-size: 14px;
+            color: #475569;
+            line-height: 1.45;
+        }
+
+        .notification-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .notification-open-btn,
+        .notification-read-btn {
+            border: none;
+            border-radius: 10px;
+            padding: 9px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .notification-open-btn {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .notification-open-btn:hover {
+            background: #2563eb;
+        }
+
+        .notification-read-btn {
+            background: #e2e8f0;
+            color: #334155;
+        }
+
+        .notification-read-btn:hover {
+            background: #cbd5e1;
+        }
+
+        .notifications-empty {
+            padding: 8px 0 4px;
+            font-size: 14px;
+            color: #64748b;
+        }
+
         .tab {
             padding: 12px 24px;
             background: none;
@@ -373,6 +561,21 @@
             <button class="tab" data-tab="participant">Участвую</button>
         </div>
 
+        <section class="notifications-panel" id="notifications-panel">
+            <div class="notifications-header">
+                <div>
+                    <div class="notifications-title-row">
+                        <h2 class="notifications-title">Уведомления участия</h2>
+                    </div>
+                    <div class="notifications-subtitle">Здесь появляются заявки и решения по вашим встречам</div>
+                </div>
+                <div class="notifications-actions">
+                    <button type="button" class="notifications-action-btn" id="notifications-mark-all">Отметить всё прочитанным</button>
+                </div>
+            </div>
+            <div class="notifications-list" id="notifications-list"></div>
+        </section>
+
         <div id="meetings-container" class="meetings-grid">
             <!-- Meetings will be loaded here -->
         </div>
@@ -384,7 +587,6 @@
     </footer>
 
     <script src="js/api.js"></script>
-    <script src="env.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/reports-bans.js"></script>

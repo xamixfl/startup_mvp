@@ -294,19 +294,49 @@ async function requestJoin(meeting, user) {
     const hasStatus = await chatMembersHasStatus();
     if (hasStatus) {
       await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id, role: 'member', status: 'pending' });
+      if (meeting.creator_id && meeting.creator_id !== user.id && typeof window.createUserNotification === 'function') {
+        const senderName = user.full_name || user.username || user.email || 'Пользователь';
+        await window.createUserNotification(meeting.creator_id, {
+          notification_type: 'event_join_request',
+          related_table: 'meetings',
+          related_id: meeting.id,
+          title: 'Новая заявка на участие',
+          message: `${senderName} хочет присоединиться к встрече «${meeting.title || 'Встреча'}».`
+        });
+      }
       showNotification('Заявка отправлена');
     } else {
       await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id });
       // Legacy mode: joining is immediate.
+      let participantAdded = false;
       try {
-        const existing = await api.get(TABLES.participants, { meeting_id: meeting.id, user_id: user.id });
-        if (!existing || existing.length === 0) {
-          await api.insert(TABLES.participants, { meeting_id: meeting.id, user_id: user.id });
-          const currentSlots = meeting.current_slots || 0;
-          await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
-          meeting.current_slots = currentSlots + 1;
+        const existingParticipant = await api.get(TABLES.participants, { meeting_id: meeting.id, user_id: user.id, $limit: 1 });
+        if (!existingParticipant || !existingParticipant[0]) {
+          await ensureParticipantRecord(meeting.id, user.id);
+          participantAdded = true;
         }
-      } catch (_e) {}
+      } catch (_e) {
+        const inserted = await ensureParticipantRecord(meeting.id, user.id);
+        participantAdded = !!inserted;
+      }
+
+      if (participantAdded) {
+        const currentSlots = meeting.current_slots || 0;
+        await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
+        meeting.current_slots = currentSlots + 1;
+
+        if (meeting.creator_id && meeting.creator_id !== user.id && typeof window.createUserNotification === 'function') {
+          const senderName = user.full_name || user.username || user.email || 'Пользователь';
+          await window.createUserNotification(meeting.creator_id, {
+            notification_type: 'event_joined_direct',
+            related_table: 'meetings',
+            related_id: meeting.id,
+            title: 'Новый участник встречи',
+            message: `${senderName} присоединился к встрече «${meeting.title || 'Встреча'}».`
+          });
+        }
+      }
+
       showNotification('Вы присоединились к встрече');
     }
     const freshUser = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
@@ -326,18 +356,21 @@ async function approveRequest(meeting, userId) {
       return;
     }
     await api.update(TABLES.chat_members, membership.id, { status: 'approved' });
+    await ensureParticipantRecord(meeting.id, userId);
 
     const currentSlots = meeting.current_slots || 0;
     await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
     meeting.current_slots = currentSlots + 1;
 
-     // Keep legacy participants ("table-connector") in sync for downstream pages.
-     try {
-       const existing = await api.get(TABLES.participants, { meeting_id: meeting.id, user_id: userId });
-       if (!existing || existing.length === 0) {
-         await api.insert(TABLES.participants, { meeting_id: meeting.id, user_id: userId });
-       }
-     } catch (_e) {}
+    if (userId && typeof window.createUserNotification === 'function') {
+      await window.createUserNotification(userId, {
+        notification_type: 'event_join_approved',
+        related_table: 'meetings',
+        related_id: meeting.id,
+        title: 'Заявка одобрена',
+        message: `Организатор добавил вас во встречу «${meeting.title || 'Встреча'}».`
+      });
+    }
 
     showNotification('Пользователь добавлен');
     await setupChatState(meeting, { id: meeting.creator_id });
@@ -356,6 +389,15 @@ async function rejectRequest(meeting, userId) {
       return;
     }
     await api.update(TABLES.chat_members, membership.id, { status: 'rejected' });
+    if (userId && typeof window.createUserNotification === 'function') {
+      await window.createUserNotification(userId, {
+        notification_type: 'event_join_rejected',
+        related_table: 'meetings',
+        related_id: meeting.id,
+        title: 'Заявка отклонена',
+        message: `Организатор отклонил вашу заявку на встречу «${meeting.title || 'Встреча'}».`
+      });
+    }
     showNotification('Заявка отклонена');
     await setupChatState(meeting, { id: meeting.creator_id });
   } catch (e) {
@@ -380,11 +422,13 @@ async function leaveChat(meeting, user) {
     } catch (_e) {}
 
     await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: user.id });
-
-    // Remove legacy participation record too.
-    try {
-      await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meeting.id, user_id: user.id });
-    } catch (_e) {}
+    if (shouldDecrement) {
+      const currentSlots = meeting.current_slots || 1;
+      const nextSlots = Math.max(currentSlots - 1, 0);
+      await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
+      meeting.current_slots = nextSlots;
+    }
+    await removeParticipantRecord(meeting.id, user.id);
 
     if (shouldDecrement) {
       const currentSlots = meeting.current_slots || 1;
@@ -425,6 +469,28 @@ async function safeInsertChatMember(data) {
     return await api.insert(TABLES.chat_members, data);
   } catch (_e) {
     return await api.insert(TABLES.chat_members, { chat_id: data.chat_id, user_id: data.user_id });
+  }
+}
+
+async function ensureParticipantRecord(meetingId, userId) {
+  if (!meetingId || !userId) return;
+  try {
+    const existing = await api.get(TABLES.participants, { meeting_id: meetingId, user_id: userId, $limit: 1 });
+    if (existing && existing[0]) return existing[0];
+    const rows = await api.insert(TABLES.participants, { meeting_id: meetingId, user_id: userId });
+    return Array.isArray(rows) ? rows[0] || null : null;
+  } catch (e) {
+    console.warn('ensureParticipantRecord failed:', e);
+    return null;
+  }
+}
+
+async function removeParticipantRecord(meetingId, userId) {
+  if (!meetingId || !userId) return;
+  try {
+    await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId, user_id: userId });
+  } catch (e) {
+    console.warn('removeParticipantRecord failed:', e);
   }
 }
 

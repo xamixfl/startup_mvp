@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>pulse — регистрация</title>
     
-    <!-- Supabase -->
-    
     <link rel="icon" href="assets/logo.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
@@ -240,7 +238,7 @@
         /* Категории */
         .categories-dropdown {
             position: relative;
-            margin-bottom: 28px;
+            margin-bottom: 18px;
         }
 
         .categories-trigger {
@@ -335,18 +333,35 @@
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
-            margin: -4px 0 14px;
-            min-height: 24px;
+            margin: 2px 0 10px;
+            min-height: 0;
+        }
+
+        .selected-interests:empty {
+            display: none;
         }
 
         .selected-interest-pill {
             background: #e2e8f0;
             color: #334155;
+            border: none;
             border-radius: 999px;
             padding: 6px 10px;
             font-size: 12px;
             line-height: 1;
             white-space: nowrap;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .selected-interest-pill:hover {
+            background: #cbd5e1;
+            color: #0f172a;
+        }
+
+        .selected-interest-pill::after {
+            content: ' ×';
+            font-weight: 700;
         }
         
         .category-checkbox {
@@ -719,7 +734,6 @@
 
     <!-- Скрипты -->
     <script src="js/api.js"></script>
-    <script src="env.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/auth.js"></script>
