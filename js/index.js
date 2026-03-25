@@ -480,6 +480,50 @@ async function joinMeeting(meetingId) {
       return;
     }
 
+    // If the backend schema supports approval flow (chat_members.status),
+    // joining should go through meeting chat requests instead of directly editing table-connector/slots.
+    let chatMembersHasStatus = true;
+    try {
+      await api.get(TABLES.chat_members, { $limit: 1, status: 'approved' });
+      chatMembersHasStatus = true;
+    } catch (_e) {
+      chatMembersHasStatus = false;
+    }
+
+    if (chatMembersHasStatus) {
+      // Joining happens via chat_members (pending -> approved). Redirect user to the meeting page.
+      if (!meeting.chat_id) {
+        showNotification('Откройте встречу, чтобы отправить заявку', 'error');
+        window.location.href = `meeting.html?id=${meetingId}`;
+        return;
+      }
+
+      try {
+        const existing = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: currentUser.id });
+        if (existing && existing[0]) {
+          showNotification(existing[0].status === 'pending' ? 'Заявка уже отправлена' : 'Вы уже в чате');
+          window.location.href = `meeting.html?id=${meetingId}`;
+          return;
+        }
+      } catch (_e) {}
+
+      try {
+        // Try full payload first; fallback to minimal schema.
+        try {
+          await api.insert(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: currentUser.id, role: 'member', status: 'pending' });
+        } catch (_e) {
+          await api.insert(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: currentUser.id });
+        }
+        showNotification('Заявка отправлена');
+        window.location.href = `meeting.html?id=${meetingId}`;
+        return;
+      } catch (e) {
+        console.error('Ошибка отправки заявки:', e);
+        showNotification('Ошибка при записи на встречу', 'error');
+        return;
+      }
+    }
+
     if (meeting.creator_id) {
       const isBlockedByCreator = await checkIfBlockedByUser(meeting.creator_id);
       if (isBlockedByCreator) {

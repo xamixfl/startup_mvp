@@ -297,7 +297,17 @@ async function requestJoin(meeting, user) {
       showNotification('Заявка отправлена');
     } else {
       await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id });
-      showNotification('Вы в чате');
+      // Legacy mode: joining is immediate.
+      try {
+        const existing = await api.get(TABLES.participants, { meeting_id: meeting.id, user_id: user.id });
+        if (!existing || existing.length === 0) {
+          await api.insert(TABLES.participants, { meeting_id: meeting.id, user_id: user.id });
+          const currentSlots = meeting.current_slots || 0;
+          await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
+          meeting.current_slots = currentSlots + 1;
+        }
+      } catch (_e) {}
+      showNotification('Вы присоединились к встрече');
     }
     const freshUser = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
     await setupChatState(meeting, freshUser || user);
@@ -320,6 +330,14 @@ async function approveRequest(meeting, userId) {
     const currentSlots = meeting.current_slots || 0;
     await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
     meeting.current_slots = currentSlots + 1;
+
+     // Keep legacy participants ("table-connector") in sync for downstream pages.
+     try {
+       const existing = await api.get(TABLES.participants, { meeting_id: meeting.id, user_id: userId });
+       if (!existing || existing.length === 0) {
+         await api.insert(TABLES.participants, { meeting_id: meeting.id, user_id: userId });
+       }
+     } catch (_e) {}
 
     showNotification('Пользователь добавлен');
     await setupChatState(meeting, { id: meeting.creator_id });
@@ -350,11 +368,30 @@ async function leaveChat(meeting, user) {
   const confirmLeave = confirm('Покинуть чат встречи?');
   if (!confirmLeave) return;
   try {
+    let shouldDecrement = true;
+    try {
+      const hasStatus = await chatMembersHasStatus();
+      if (hasStatus) {
+        const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
+        const m = (rows || [])[0];
+        // Only approved members occupy a slot.
+        shouldDecrement = (m && m.status === 'approved');
+      }
+    } catch (_e) {}
+
     await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: user.id });
-    const currentSlots = meeting.current_slots || 1;
-    const nextSlots = Math.max(currentSlots - 1, 0);
-    await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
-    meeting.current_slots = nextSlots;
+
+    // Remove legacy participation record too.
+    try {
+      await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meeting.id, user_id: user.id });
+    } catch (_e) {}
+
+    if (shouldDecrement) {
+      const currentSlots = meeting.current_slots || 1;
+      const nextSlots = Math.max(currentSlots - 1, 0);
+      await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
+      meeting.current_slots = nextSlots;
+    }
     showNotification('Вы вышли из чата');
     await setupChatState(meeting, user);
   } catch (e) {

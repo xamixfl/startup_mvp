@@ -27,6 +27,15 @@ async function loadMeetings() {
   }
 
   try {
+    const chatMembersHasStatus = async () => {
+      try {
+        await api.get(TABLES.chat_members, { $limit: 1, status: 'approved' });
+        return true;
+      } catch (_e) {
+        return false;
+      }
+    };
+
     const safeGetMeetings = async (filters) => {
       // Some deployments may not have `created_at` (or server-side ordering support).
       // Prefer DB ordering when available, otherwise sort client-side.
@@ -47,8 +56,31 @@ async function loadMeetings() {
 
     const ownedMeetings = await safeGetMeetings({ creator_id: currentUser.id });
 
-    const participantRows = await api.get(TABLES.participants, { user_id: currentUser.id });
-    const participantMeetingIds = (participantRows || []).map(p => p.meeting_id).filter(Boolean);
+    // Participation can be stored either in TABLES.participants (legacy "table-connector")
+    // or via chat membership (chat_members -> chats.meeting_id).
+    let participantMeetingIds = [];
+    try {
+      const participantRows = await api.get(TABLES.participants, { user_id: currentUser.id });
+      participantMeetingIds = (participantRows || []).map(p => p.meeting_id).filter(Boolean);
+    } catch (_e) {
+      participantMeetingIds = [];
+    }
+
+    try {
+      const hasStatus = await chatMembersHasStatus();
+      const memberships = await api.get(TABLES.chat_members, hasStatus
+        ? { user_id: currentUser.id, status: 'approved' }
+        : { user_id: currentUser.id }
+      );
+      const chatIds = Array.from(new Set((memberships || []).map(m => m.chat_id).filter(Boolean)));
+      if (chatIds.length > 0) {
+        const chatsRows = await api.get(TABLES.chats, { id: { in: chatIds } });
+        const meetingIds = (chatsRows || []).map(c => c.meeting_id).filter(Boolean);
+        participantMeetingIds = Array.from(new Set([...participantMeetingIds, ...meetingIds]));
+      }
+    } catch (_e) {
+      // ignore
+    }
 
     let participantMeetings = [];
     if (participantMeetingIds.length > 0) {
@@ -254,6 +286,11 @@ window.deleteMeeting = async function (meetingId) {
       alert('Нет прав на удаление');
       return;
     }
+
+    // Keep legacy participants ("table-connector") clean.
+    try {
+      await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });
+    } catch (_e) {}
     await api.delete(TABLES.meetings, meetingId);
     await loadMeetings();
   } catch (error) {

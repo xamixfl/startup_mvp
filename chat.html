@@ -559,6 +559,50 @@
       gap: 10px;
     }
 
+    .participant-item.owner {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+
+    .participant-badge {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    .info-about {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.5;
+      padding: 10px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: white;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .info-interests {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .info-pill {
+      background: #e2e8f0;
+      color: #334155;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
     .participant-item {
       display: flex;
       align-items: center;
@@ -620,7 +664,7 @@
           <div class="typing-indicator" id="typing-indicator" style="display:none;">Собеседник печатает...</div>
         </div>
         <div class="chat-header-actions">
-          <button id="chat-report-btn" class="btn-report" style="display: none;">⚠️ Пожаловаться</button>
+          <!-- report button removed by request -->
         </div>
       </div>
       <div class="chat-body" id="chat-body">

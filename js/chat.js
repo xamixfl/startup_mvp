@@ -50,10 +50,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupTypingIndicator();
   setupImageModal();
   setupTitleToggle();
-  setupReportButton();
 
   startChatListPolling();
 });
+
+function getChatDisplayTitle(chat) {
+  if (!chat) return 'Чат';
+  return chat.__displayTitle || chat.title || 'Чат';
+}
 
 let __chatMembersHasStatus = null;
 async function chatMembersHasStatus() {
@@ -184,6 +188,7 @@ async function loadChats(isRefresh = false) {
     });
 
     chats = Array.isArray(chatsRows) ? chatsRows : [];
+    await enrichChatsForUi(chats);
     renderChatList(list);
 
     const pendingId = window.__pendingOpenChatId;
@@ -202,6 +207,54 @@ async function loadChats(isRefresh = false) {
   }
 }
 
+async function enrichChatsForUi(chatsList) {
+  const direct = (chatsList || []).filter(c => c && !c.meeting_id);
+  if (direct.length === 0) return;
+
+  // 1) Find peer ids for direct chats from chat_members (ignore unreliable chat.peer_id/chat.title).
+  const directChatIds = direct.map(c => c.id).filter(Boolean);
+  const byChatId = new Map();
+  try {
+    const memberRows = await api.get(TABLES.chat_members, { chat_id: { in: directChatIds } });
+    (memberRows || []).forEach(r => {
+      if (!r?.chat_id || !r?.user_id) return;
+      if (!byChatId.has(r.chat_id)) byChatId.set(r.chat_id, []);
+      byChatId.get(r.chat_id).push(r.user_id);
+    });
+  } catch (_e) {
+    // ignore
+  }
+
+  const peerIds = [];
+  for (const chat of direct) {
+    const ids = byChatId.get(chat.id) || [];
+    let peerId = ids.find(id => id && id !== currentUser.id) || null;
+    // If chat.peer_id points to self, treat it as invalid.
+    if (!peerId && chat.peer_id && chat.peer_id !== currentUser.id) {
+      peerId = chat.peer_id;
+    }
+    if (peerId) {
+      chat.peer_id = peerId;
+      peerIds.push(peerId);
+    }
+  }
+
+  // 2) Fetch peer profiles in batch and attach display titles
+  const uniquePeerIds = Array.from(new Set(peerIds));
+  const profiles = uniquePeerIds.length
+    ? await api.get(TABLES.profiles, { id: { in: uniquePeerIds } })
+    : [];
+  const byId = new Map((profiles || []).map(p => [p.id, p]));
+
+  for (const chat of direct) {
+    const peer = chat.peer_id ? byId.get(chat.peer_id) : null;
+    chat.__peerProfile = peer || null;
+    chat.__displayTitle = peer
+      ? (peer.full_name || peer.username || chat.title || 'Личный чат')
+      : (chat.title || 'Личный чат');
+  }
+}
+
 function renderChatList(list) {
   list.innerHTML = '';
 
@@ -211,7 +264,7 @@ function renderChatList(list) {
     if (chat.is_admin_chat) item.classList.add('chat-item-admin');
     item.dataset.chatId = chat.id;
 
-    const title = chat.title || 'Чат';
+    const title = getChatDisplayTitle(chat);
     item.innerHTML = `
       <div class="chat-item-row">
         <div class="chat-item-title">${escapeHtml(title)}</div>
@@ -278,7 +331,13 @@ async function openChat(chatId) {
   highlightActiveChat(chatId);
 
   const title = document.getElementById('chat-title');
-  if (title) title.textContent = chat.title || 'Чат';
+  if (title) title.textContent = getChatDisplayTitle(chat);
+
+  // Refresh info panel content if it's currently open.
+  const app = document.getElementById('chat-app');
+  if (app && app.classList.contains('show-info')) {
+    renderInfoPanel(chat).catch(() => {});
+  }
 
   // Enable input controls now that a chat is selected
   const input = document.getElementById('chat-input');
@@ -288,14 +347,14 @@ async function openChat(chatId) {
   if (sendBtn) sendBtn.disabled = false;
   if (attachBtn) attachBtn.disabled = false;
 
-  const reportBtn = document.getElementById('chat-report-btn');
-  if (reportBtn) reportBtn.style.display = 'inline-flex';
-
   renderEmptyChat('Загрузка сообщений...');
   const meta = await loadMessages(chatId);
   currentChatMessageSignature = meta?.signature || currentChatMessageSignature;
 
   markChatRead(chatId, meta?.lastCreatedAt);
+  // Optimistically clear badge for the opened chat.
+  const badgeEl = document.querySelector(`.chat-item[data-chat-id="${chatId}"] .chat-unread`);
+  if (badgeEl) badgeEl.style.display = 'none';
   updateChatListUnreadBadges().catch(() => {});
 
   startMessagePolling(chatId);
@@ -621,28 +680,191 @@ function setupTitleToggle() {
   if (!title) return;
   title.onclick = () => {
     if (!currentChat) return;
-    // For meeting chats: open meeting; for direct chats: open peer profile
-    if (currentChat.meeting_id) {
-      window.location.href = `meeting.html?id=${currentChat.meeting_id}`;
-      return;
-    }
-    if (currentChat.peer_id) {
-      window.location.href = `profile.html?id=${currentChat.peer_id}`;
-    }
+    toggleInfoPanel();
   };
 }
 
-function setupReportButton() {
-  const btn = document.getElementById('chat-report-btn');
-  if (!btn) return;
-  btn.onclick = () => {
-    if (!currentChat) return;
-    if (typeof window.openReportModal !== 'function') {
-      alert('Модуль жалоб не загружен');
-      return;
+function toggleInfoPanel(force) {
+  const app = document.getElementById('chat-app');
+  if (!app) return;
+  const next = typeof force === 'boolean' ? force : !app.classList.contains('show-info');
+  app.classList.toggle('show-info', next);
+  if (next) {
+    renderInfoPanel(currentChat).catch(() => {});
+  }
+}
+
+async function renderInfoPanel(chat) {
+  const content = document.getElementById('info-content');
+  if (!content) return;
+
+  if (!chat) {
+    content.innerHTML = '<div class="chat-empty">Нет выбранного чата</div>';
+    return;
+  }
+
+  content.innerHTML = '<div class="chat-empty">Загрузка...</div>';
+
+  if (chat.meeting_id) {
+    await renderMeetingInfo(chat, content);
+    return;
+  }
+  await renderDirectInfo(chat, content);
+}
+
+async function renderMeetingInfo(chat, contentEl) {
+  const meetingId = chat.meeting_id;
+  if (!meetingId) {
+    contentEl.innerHTML = '<div class="chat-empty">Нет данных о встрече</div>';
+    return;
+  }
+
+  let meeting = null;
+  try {
+    meeting = await api.getOne(TABLES.meetings, meetingId);
+  } catch (_e) {}
+
+  if (!meeting) {
+    contentEl.innerHTML = '<div class="chat-empty">Встреча не найдена</div>';
+    return;
+  }
+
+  let creator = null;
+  if (meeting.creator_id) {
+    try {
+      creator = await api.getOne(TABLES.profiles, meeting.creator_id);
+    } catch (_e) {}
+  }
+
+  const topic = TOPICS && meeting.topic ? (TOPICS.find(t => t.id === meeting.topic) || null) : null;
+  const tagLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
+  const tagStyle = topic?.color ? `style="background:${escapeHtml(topic.color)}20;color:${escapeHtml(topic.color)}"` : '';
+
+  const location = meeting.location || 'Город не указан';
+  const slots = `${meeting.current_slots || 0}/${meeting.max_slots || 0}`;
+
+  // Participants: take them from chat_members of this meeting chat.
+  let memberRows = [];
+  try {
+    const hasStatus = await chatMembersHasStatus();
+    memberRows = await api.get(TABLES.chat_members, hasStatus
+      ? { chat_id: chat.id, status: 'approved' }
+      : { chat_id: chat.id }
+    );
+  } catch (_e) {
+    memberRows = [];
+  }
+  const userIds = Array.from(new Set([meeting.creator_id, ...(memberRows || []).map(r => r.user_id)].filter(Boolean)));
+  let profiles = [];
+  try {
+    profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
+  } catch (_e) {
+    profiles = [];
+  }
+  const byId = new Map((profiles || []).map(p => [p.id, p]));
+
+  const ownerId = meeting.creator_id;
+  const orderedIds = ownerId ? [ownerId, ...userIds.filter(id => id !== ownerId)] : userIds;
+
+  const participantsHtml = orderedIds.map(id => {
+    const p = byId.get(id) || {};
+    const name = p.full_name || p.username || 'Пользователь';
+    const age = p.age ? `${p.age} лет` : '';
+    const avatar = p.photo_URL && p.photo_URL !== 'user' ? p.photo_URL : DEFAULT_AVATAR;
+    const isOwner = ownerId && id === ownerId;
+    return `
+      <a class="participant-item ${isOwner ? 'owner' : ''}" href="profile.html?id=${escapeHtml(id)}">
+        <img class="participant-avatar" src="${escapeHtml(avatar)}" alt="${escapeHtml(name)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
+        <div>
+          <div class="participant-name">${escapeHtml(name)}</div>
+          <div class="participant-age">${escapeHtml(age)}</div>
+        </div>
+        ${isOwner ? '<div class="participant-badge">Создатель</div>' : ''}
+      </a>
+    `;
+  }).join('');
+
+  const creatorName = creator?.full_name || creator?.username || 'Автор';
+  const creatorAge = creator?.age ? `${creator.age} лет` : 'Возраст не указан';
+  const creatorAvatar = creator?.photo_URL && creator.photo_URL !== 'user' ? creator.photo_URL : DEFAULT_AVATAR;
+
+  contentEl.innerHTML = `
+    <div class="meeting-card">
+      <div class="meeting-tag" ${tagStyle}>${escapeHtml(tagLabel)}</div>
+      <a class="meeting-title" href="meeting.html?id=${escapeHtml(meeting.id)}">${escapeHtml(meeting.title || 'Встреча')}</a>
+      <div class="meeting-meta">
+        <div>📍 ${escapeHtml(location)}</div>
+        <div>👥 ${escapeHtml(slots)} участников</div>
+      </div>
+    </div>
+    <div class="info-profile">
+      <img class="info-avatar" src="${escapeHtml(creatorAvatar)}" alt="${escapeHtml(creatorName)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
+      <a class="info-name" href="profile.html?id=${escapeHtml(creator?.id || meeting.creator_id)}">${escapeHtml(creatorName)}</a>
+      <div class="info-age">${escapeHtml(creatorAge)}</div>
+      <div class="info-actions">
+        <button type="button" class="info-btn secondary" onclick="window.location.href='meeting.html?id=${escapeHtml(meeting.id)}'">Открыть встречу</button>
+      </div>
+    </div>
+    <div>
+      <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Участники</div>
+      <div class="participants-list">
+        ${participantsHtml || '<div class=\"chat-empty\">Пока нет участников</div>'}
+      </div>
+    </div>
+  `;
+}
+
+async function renderDirectInfo(chat, contentEl) {
+  let peer = chat.__peerProfile || null;
+  let peerId = chat.peer_id || null;
+  if (peerId === currentUser.id) peerId = null;
+
+  if (!peerId) {
+    try {
+      const members = await api.get(TABLES.chat_members, { chat_id: chat.id });
+      peerId = (members || []).map(m => m.user_id).find(id => id && id !== currentUser.id) || null;
+      if (peerId) chat.peer_id = peerId;
+    } catch (_e) {}
+  }
+
+  if (!peer && peerId) {
+    try {
+      peer = await api.getOne(TABLES.profiles, peerId);
+    } catch (_e) {
+      peer = null;
     }
-    window.openReportModal('chat', currentChat.id, { title: currentChat.title || 'Чат' });
-  };
+  }
+
+  if (!peer) {
+    contentEl.innerHTML = '<div class="chat-empty">Не удалось загрузить профиль собеседника</div>';
+    return;
+  }
+
+  const name = peer.full_name || peer.username || 'Пользователь';
+  const age = peer.age ? `${peer.age} лет` : '';
+  const city = peer.location || peer.city || '';
+  const about = peer.about || peer.bio || peer.description || '';
+  const avatar = peer.photo_URL && peer.photo_URL !== 'user' ? peer.photo_URL : DEFAULT_AVATAR;
+
+  const interests = Array.isArray(peer.interests) ? peer.interests : [];
+  const pills = interests.map(id => {
+    const topic = TOPICS ? TOPICS.find(t => t.id === id) : null;
+    const label = topic?.name ? topic.name : String(id);
+    return `<div class="info-pill">${escapeHtml(label)}</div>`;
+  }).join('');
+
+  contentEl.innerHTML = `
+    <div class="info-profile">
+      <img class="info-avatar" src="${escapeHtml(avatar)}" alt="${escapeHtml(name)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
+      <a class="info-name" href="profile.html?id=${escapeHtml(peer.id)}">${escapeHtml(name)}</a>
+      <div class="info-age">${escapeHtml([age, city].filter(Boolean).join(' • '))}</div>
+      ${about ? `<div class="info-about">${escapeHtml(about)}</div>` : ''}
+      ${pills ? `<div class="info-interests">${pills}</div>` : ''}
+      <div class="info-actions">
+        <button type="button" class="info-btn secondary" onclick="window.location.href='profile.html?id=${escapeHtml(peer.id)}'">Открыть профиль</button>
+      </div>
+    </div>
+  `;
 }
 
 function escapeHtml(value) {

@@ -240,12 +240,41 @@ async function fetchUserMeetings(profile, list) {
       $order: { column: 'created_at', ascending: false }
     });
 
-    const memberships = await api.get(TABLES.participants, { user_id: profile.id });
-    const meetingIds = Array.from(new Set((memberships || []).map(m => m.meeting_id).filter(Boolean)));
-    let joined = [];
-    if (meetingIds.length) {
-      joined = await api.get(TABLES.meetings, { id: { in: meetingIds } });
+    // Joined meetings can be tracked via legacy participants ("table-connector") or via chat membership.
+    let meetingIds = [];
+    try {
+      const memberships = await api.get(TABLES.participants, { user_id: profile.id });
+      meetingIds = Array.from(new Set((memberships || []).map(m => m.meeting_id).filter(Boolean)));
+    } catch (_e) {
+      meetingIds = [];
     }
+
+    try {
+      // chat_members -> chats.meeting_id
+      let hasStatus = true;
+      try {
+        await api.get(TABLES.chat_members, { $limit: 1, status: 'approved' });
+        hasStatus = true;
+      } catch (_e2) {
+        hasStatus = false;
+      }
+
+      const rows = await api.get(TABLES.chat_members, hasStatus
+        ? { user_id: profile.id, status: 'approved' }
+        : { user_id: profile.id }
+      );
+      const chatIds = Array.from(new Set((rows || []).map(r => r.chat_id).filter(Boolean)));
+      if (chatIds.length) {
+        const chats = await api.get(TABLES.chats, { id: { in: chatIds } });
+        const ids2 = (chats || []).map(c => c.meeting_id).filter(Boolean);
+        meetingIds = Array.from(new Set([...meetingIds, ...ids2]));
+      }
+    } catch (_e) {
+      // ignore
+    }
+
+    let joined = [];
+    if (meetingIds.length) joined = await api.get(TABLES.meetings, { id: { in: meetingIds } });
 
     const merged = [...(created || []), ...(joined || [])];
     const uniqueMeetings = Array.from(new Map(merged.map(m => [m.id, m])).values());
