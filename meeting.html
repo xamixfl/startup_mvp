@@ -350,6 +350,74 @@
         .footer a:hover {
             text-decoration: underline;
         }
+
+        .members-title {
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 10px;
+        }
+
+        .members-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .member-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            text-decoration: none;
+            color: #0f172a;
+            background: #fff;
+        }
+
+        .member-item.owner {
+            border-color: #93c5fd;
+            background: #eff6ff;
+        }
+
+        .member-avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+            background: #f1f5f9;
+            flex: 0 0 38px;
+        }
+
+        .member-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .member-name {
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .member-sub {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        .member-badge {
+            margin-left: auto;
+            font-size: 11px;
+            font-weight: 900;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: #dbeafe;
+            color: #1d4ed8;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -393,6 +461,10 @@
                     </div>
                 </div>
                 <div class="card participants" id="participants-info">👥 0/0 участников</div>
+                <div class="card" id="participants-list-card" style="display: none;">
+                    <div class="members-title">Участники</div>
+                    <div id="participants-list" class="members-list"></div>
+                </div>
                 <div class="card" id="join-status-card" style="display: none;">
                     <div class="details-title">Статус участия</div>
                     <div id="join-status-text" class="details-text" style="margin-bottom: 0;">—</div>

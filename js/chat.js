@@ -16,6 +16,24 @@ let typingTimeoutId = null;
 let currentChatMessageSignature = 'empty';
 let pendingImageFile = null;
 const MAX_IMAGE_MB = 5;
+let currentChatLastCreatedAt = null;
+let openedChatReadAt = {};
+const renderedMessageKeysByChat = new Map();
+
+function isoMax(a, b) {
+  if (!a) return b || null;
+  if (!b) return a || null;
+  // ISO-8601 timestamps compare lexicographically in the same order as time.
+  return a > b ? a : b;
+}
+
+function getRenderedKeySet(chatId) {
+  if (!chatId) return new Set();
+  if (!renderedMessageKeysByChat.has(chatId)) {
+    renderedMessageKeysByChat.set(chatId, new Set());
+  }
+  return renderedMessageKeysByChat.get(chatId);
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   currentUser = typeof window.getCurrentUser === 'function'
@@ -117,9 +135,8 @@ function startMessagePolling(chatId) {
   stopMessagePolling();
   messagePollTimer = setInterval(async () => {
     if (!currentChat || currentChat.id !== chatId) return;
-    const meta = await loadMessages(chatId, { silent: true });
-    if (meta?.signature) currentChatMessageSignature = meta.signature;
-  }, 2000);
+    await pollNewMessages(chatId);
+  }, 600);
 }
 
 function stopMessagePolling() {
@@ -299,8 +316,13 @@ async function updateChatListUnreadBadges() {
   for (const chat of chats) {
     const el = document.querySelector(`.chat-item[data-chat-id="${chat.id}"] .chat-unread`);
     if (!el) continue;
+    // If the chat is currently open, consider it read for UI purposes.
+    if (currentChat && currentChat.id === chat.id) {
+      el.style.display = 'none';
+      continue;
+    }
     const readKey = `${currentUser.id}:${chat.id}`;
-    const lastRead = readMap[readKey];
+    const lastRead = openedChatReadAt[chat.id] || readMap[readKey];
 
     const filters = {
       chat_id: chat.id,
@@ -348,10 +370,16 @@ async function openChat(chatId) {
   if (attachBtn) attachBtn.disabled = false;
 
   renderEmptyChat('Загрузка сообщений...');
-  const meta = await loadMessages(chatId);
+  const meta = await loadInitialMessages(chatId);
   currentChatMessageSignature = meta?.signature || currentChatMessageSignature;
+  currentChatLastCreatedAt = meta?.lastCreatedAt || null;
 
-  markChatRead(chatId, meta?.lastCreatedAt);
+  // Mark as read at the moment the user opened the chat.
+  // This avoids "unread" badges sticking around when the chat has many messages
+  // or when we only fetched a limited window of history.
+  const readAt = new Date().toISOString();
+  openedChatReadAt[chatId] = readAt;
+  markChatRead(chatId, readAt);
   // Optimistically clear badge for the opened chat.
   const badgeEl = document.querySelector(`.chat-item[data-chat-id="${chatId}"] .chat-unread`);
   if (badgeEl) badgeEl.style.display = 'none';
@@ -370,27 +398,45 @@ function renderEmptyChat(text = 'Выберите чат слева') {
 function computeMessageSignature(messages) {
   if (!messages || messages.length === 0) return 'empty';
   const last = messages[messages.length - 1];
-  return `${messages.length}:${last.id || ''}:${last.created_at || ''}`;
+  const at = getMsgCreatedAt(last) || '';
+  return `${messages.length}:${last.id || ''}:${at}`;
 }
 
-async function loadMessages(chatId, opts = {}) {
+function getMsgCreatedAt(msg) {
+  return msg?.created_at || msg?.createdAt || msg?.timestamp || null;
+}
+
+function isAtBottom(bodyEl) {
+  if (!bodyEl) return true;
+  return (bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight) < 60;
+}
+
+async function loadInitialMessages(chatId) {
   const body = document.getElementById('chat-body');
   if (!body) return null;
 
   try {
-    const messages = await api.get(TABLES.chat_messages, {
-      chat_id: chatId,
-      $order: { column: 'created_at', ascending: true },
-      $limit: 200
-    });
-
-    const signature = computeMessageSignature(messages);
-    if (opts.silent && signature === currentChatMessageSignature) {
-      return { signature, lastCreatedAt: null };
+    let messages = [];
+    try {
+      messages = await api.get(TABLES.chat_messages, {
+        chat_id: chatId,
+        $order: { column: 'created_at', ascending: true },
+        $limit: 200
+      });
+    } catch (_e) {
+      // Fallback when server-side ordering isn't available.
+      messages = await api.get(TABLES.chat_messages, { chat_id: chatId, $limit: 200 });
+      messages = (messages || []).sort((a, b) => {
+        const ta = new Date(getMsgCreatedAt(a) || 0).getTime();
+        const tb = new Date(getMsgCreatedAt(b) || 0).getTime();
+        return ta - tb;
+      });
     }
 
+    const signature = computeMessageSignature(messages);
     currentChatMessageSignature = signature;
     body.innerHTML = '';
+    getRenderedKeySet(chatId).clear();
 
     const userIds = Array.from(new Set((messages || []).map(m => m.user_id).filter(Boolean)));
     const profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
@@ -404,6 +450,8 @@ async function loadMessages(chatId, opts = {}) {
         previousMessageDateKey = messageDateKey;
       }
 
+      const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
+      getRenderedKeySet(chatId).add(key);
       const mine = msg.user_id === currentUser.id;
       const p = byId.get(msg.user_id);
       body.appendChild(renderMessage(msg, p, mine));
@@ -411,15 +459,73 @@ async function loadMessages(chatId, opts = {}) {
 
     body.scrollTop = body.scrollHeight;
 
-    const lastCreatedAt = (messages && messages.length) ? messages[messages.length - 1].created_at : null;
+    const lastCreatedAt = (messages && messages.length) ? getMsgCreatedAt(messages[messages.length - 1]) : null;
     return { signature, lastCreatedAt };
   } catch (error) {
-    if (!opts.silent) {
-      console.error('Ошибка загрузки сообщений:', error);
-      renderEmptyChat('Ошибка загрузки сообщений');
-    }
+    console.error('Ошибка загрузки сообщений:', error);
+    renderEmptyChat('Ошибка загрузки сообщений');
     return null;
   }
+}
+
+async function pollNewMessages(chatId) {
+  const body = document.getElementById('chat-body');
+  if (!body || !currentUser || !currentChat || currentChat.id !== chatId) return;
+
+  const wasAtBottom = isAtBottom(body);
+
+  const filters = {
+    chat_id: chatId,
+    $order: { column: 'created_at', ascending: true },
+    $limit: 50
+  };
+  if (currentChatLastCreatedAt) {
+    filters.created_at = { gt: currentChatLastCreatedAt };
+  }
+
+  let messages = [];
+  try {
+    messages = await api.get(TABLES.chat_messages, filters);
+  } catch (_e) {
+    return;
+  }
+  if (!messages || messages.length === 0) return;
+
+  const seen = getRenderedKeySet(chatId);
+  const fresh = [];
+  for (const msg of messages) {
+    const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fresh.push(msg);
+  }
+  if (fresh.length === 0) return;
+
+  const userIds = Array.from(new Set(fresh.map(m => m.user_id).filter(Boolean)));
+  let profiles = [];
+  try {
+    profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
+  } catch (_e) {
+    profiles = [];
+  }
+  const byId = new Map((profiles || []).map(p => [p.id, p]));
+
+  fresh.forEach(msg => {
+    const mine = msg.user_id === currentUser.id;
+    const p = byId.get(msg.user_id);
+    body.appendChild(renderMessage(msg, p, mine));
+  });
+
+  const last = fresh[fresh.length - 1];
+  const lastAt = getMsgCreatedAt(last);
+  if (lastAt) {
+    currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, lastAt);
+    openedChatReadAt[chatId] = isoMax(openedChatReadAt[chatId], lastAt);
+    markChatRead(chatId, lastAt);
+  }
+
+  if (wasAtBottom) body.scrollTop = body.scrollHeight;
+  updateChatListUnreadBadges().catch(() => {});
 }
 
 function renderMessage(msg, profile, mine) {
@@ -535,7 +641,9 @@ function markChatRead(chatId, createdAt) {
     readMap = raw ? JSON.parse(raw) : {};
   } catch (_e) {}
   const key = `${currentUser.id}:${chatId}`;
-  readMap[key] = createdAt || new Date().toISOString();
+  const next = createdAt || new Date().toISOString();
+  // Never move the read cursor backwards.
+  readMap[key] = isoMax(readMap[key], next) || next;
   try {
     localStorage.setItem(UNREAD_KEY, JSON.stringify(readMap));
   } catch (_e) {}
@@ -562,10 +670,24 @@ function setupSendMessage() {
     }
 
     try {
-      await api.insert(TABLES.chat_messages, { chat_id: currentChat.id, user_id: currentUser.id, content: text });
+      const inserted = await api.insert(TABLES.chat_messages, { chat_id: currentChat.id, user_id: currentUser.id, content: text });
+      const row = Array.isArray(inserted) ? inserted[0] : inserted;
       input.value = '';
-      const meta = await loadMessages(currentChat.id);
-      markChatRead(currentChat.id, meta?.lastCreatedAt);
+
+      if (row) {
+        const key = row.id ? `id:${row.id}` : `k:${getMsgCreatedAt(row) || ''}:${row.user_id || ''}:${row.content || ''}`;
+        getRenderedKeySet(currentChat.id).add(key);
+        const body = document.getElementById('chat-body');
+        if (body) {
+          body.appendChild(renderMessage(row, currentUser, true));
+          body.scrollTop = body.scrollHeight;
+        }
+        const at = getMsgCreatedAt(row) || new Date().toISOString();
+        currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, at);
+        openedChatReadAt[currentChat.id] = isoMax(openedChatReadAt[currentChat.id], currentChatLastCreatedAt);
+        markChatRead(currentChat.id, currentChatLastCreatedAt);
+      }
+
       updateChatListUnreadBadges().catch(() => {});
     } catch (error) {
       console.error('Ошибка отправки сообщения:', error);
@@ -647,10 +769,23 @@ async function uploadAndSendImage(file) {
     const imageUrl = json && json.url ? json.url : null;
     if (!imageUrl) throw new Error('no url');
 
-    await api.insert(TABLES.chat_messages, { chat_id: currentChat.id, user_id: currentUser.id, content: `image:${imageUrl}` });
+    const inserted = await api.insert(TABLES.chat_messages, { chat_id: currentChat.id, user_id: currentUser.id, content: `image:${imageUrl}` });
+    const row = Array.isArray(inserted) ? inserted[0] : inserted;
 
-    const meta = await loadMessages(currentChat.id);
-    markChatRead(currentChat.id, meta?.lastCreatedAt);
+    if (row) {
+      const key = row.id ? `id:${row.id}` : `k:${getMsgCreatedAt(row) || ''}:${row.user_id || ''}:${row.content || ''}`;
+      getRenderedKeySet(currentChat.id).add(key);
+      const body = document.getElementById('chat-body');
+      if (body) {
+        body.appendChild(renderMessage(row, currentUser, true));
+        body.scrollTop = body.scrollHeight;
+      }
+      const at = getMsgCreatedAt(row) || new Date().toISOString();
+      currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, at);
+      openedChatReadAt[currentChat.id] = isoMax(openedChatReadAt[currentChat.id], currentChatLastCreatedAt);
+      markChatRead(currentChat.id, currentChatLastCreatedAt);
+    }
+
     updateChatListUnreadBadges().catch(() => {});
   } catch (error) {
     console.error('Ошибка отправки изображения:', error);
@@ -838,6 +973,7 @@ async function renderMeetingInfo(chat, contentEl) {
 
   const ownerId = meeting.creator_id;
   const orderedIds = ownerId ? [ownerId, ...userIds.filter(id => id !== ownerId)] : userIds;
+  const canLeave = !!(currentUser && ownerId && currentUser.id !== ownerId && (memberRows || []).some(r => r.user_id === currentUser.id));
 
   const participantsHtml = orderedIds.map(id => {
     const p = byId.get(id) || {};
@@ -876,6 +1012,7 @@ async function renderMeetingInfo(chat, contentEl) {
       <div class="info-age">${escapeHtml(creatorAge)}</div>
       <div class="info-actions">
         <button type="button" class="info-btn secondary" onclick="window.location.href='meeting.html?id=${escapeHtml(meeting.id)}'">Открыть встречу</button>
+        ${canLeave ? `<button type="button" class="info-btn danger" id="info-leave-btn">Покинуть чат</button>` : ''}
       </div>
     </div>
     <div>
@@ -885,6 +1022,53 @@ async function renderMeetingInfo(chat, contentEl) {
       </div>
     </div>
   `;
+
+  if (canLeave) {
+    const btn = contentEl.querySelector('#info-leave-btn');
+    if (btn) {
+      btn.onclick = async () => {
+        await leaveMeetingChatFromPanel(chat, meeting);
+      };
+    }
+  }
+}
+
+async function leaveMeetingChatFromPanel(chat, meeting) {
+  if (!currentUser || !chat || !meeting) return;
+  const ok = confirm('Покинуть чат встречи?');
+  if (!ok) return;
+
+  try {
+    const hasStatus = await chatMembersHasStatus();
+    let shouldDecrement = true;
+    if (hasStatus) {
+      const rows = await api.get(TABLES.chat_members, { chat_id: chat.id, user_id: currentUser.id });
+      const m = (rows || [])[0];
+      shouldDecrement = (m && m.status === 'approved');
+    }
+
+    await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id, user_id: currentUser.id });
+    try {
+      await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meeting.id, user_id: currentUser.id });
+    } catch (_e) {}
+
+    if (shouldDecrement) {
+      const currentSlots = meeting.current_slots || 1;
+      const nextSlots = Math.max(currentSlots - 1, 0);
+      try {
+        await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
+      } catch (_e) {}
+    }
+
+    // Refresh chat list and close the current chat view
+    currentChat = null;
+    renderEmptyChat('Выберите чат слева');
+    await loadChats(true);
+    toggleInfoPanel(false);
+  } catch (e) {
+    console.error('Ошибка выхода из чата:', e);
+    alert('Не удалось покинуть чат');
+  }
 }
 
 async function renderDirectInfo(chat, contentEl) {

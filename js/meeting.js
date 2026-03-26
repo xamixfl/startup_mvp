@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupOwnerActions(meeting, user);
   await ensureMeetingChat(meeting, user);
   await setupChatState(meeting, user);
+  await renderParticipantsList(meeting, user);
 
   const joinBtn = document.getElementById('join-button');
   if (joinBtn) {
@@ -191,6 +192,9 @@ async function setupChatState(meeting, user) {
     if (statusCard) statusCard.style.display = 'none';
     if (requestsCard) requestsCard.style.display = 'none';
     if (joinButton) joinButton.style.display = '';
+    // Not logged in or chat missing -> hide members list
+    const membersCard = document.getElementById('participants-list-card');
+    if (membersCard) membersCard.style.display = 'none';
     return;
   }
 
@@ -272,6 +276,104 @@ async function setupChatState(meeting, user) {
   }
 }
 
+async function canSeeParticipants(meeting, user) {
+  if (!meeting || !user) return false;
+  if (meeting.creator_id && user.id === meeting.creator_id) return true;
+
+  // Prefer chat membership (approved) when chat exists.
+  if (meeting.chat_id) {
+    try {
+      const hasStatus = await chatMembersHasStatus();
+      const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
+      const m = (rows || [])[0] || null;
+      if (!m) return false;
+      if (!hasStatus) return true;
+      return m.status === 'approved';
+    } catch (_e) {}
+  }
+
+  // Fallback to legacy participants table.
+  try {
+    const rows = await api.get(TABLES.participants, { meeting_id: meeting.id, user_id: user.id });
+    return !!(rows && rows[0]);
+  } catch (_e) {
+    return false;
+  }
+}
+
+async function renderParticipantsList(meeting, user) {
+  const card = document.getElementById('participants-list-card');
+  const list = document.getElementById('participants-list');
+  if (!card || !list) return;
+
+  const allowed = await canSeeParticipants(meeting, user);
+  if (!allowed) {
+    card.style.display = 'none';
+    return;
+  }
+
+  list.innerHTML = 'Загрузка...';
+  card.style.display = 'block';
+
+  let userIds = [];
+  try {
+    if (meeting.chat_id) {
+      const hasStatus = await chatMembersHasStatus();
+      const rows = await api.get(TABLES.chat_members, hasStatus
+        ? { chat_id: meeting.chat_id, status: 'approved' }
+        : { chat_id: meeting.chat_id }
+      );
+      userIds = (rows || []).map(r => r.user_id).filter(Boolean);
+    } else {
+      const rows = await api.get(TABLES.participants, { meeting_id: meeting.id });
+      userIds = (rows || []).map(r => r.user_id).filter(Boolean);
+    }
+  } catch (_e) {
+    userIds = [];
+  }
+
+  if (meeting.creator_id) userIds.push(meeting.creator_id);
+  userIds = Array.from(new Set(userIds.filter(Boolean)));
+
+  if (userIds.length === 0) {
+    list.innerHTML = '<div style="color:#64748b;">Пока нет участников</div>';
+    return;
+  }
+
+  let profiles = [];
+  try {
+    profiles = await api.get(TABLES.profiles, { id: { in: userIds } });
+  } catch (_e) {
+    profiles = [];
+  }
+  const byId = new Map((profiles || []).map(p => [p.id, p]));
+
+  const ownerId = meeting.creator_id || null;
+  const orderedIds = ownerId ? [ownerId, ...userIds.filter(id => id !== ownerId)] : userIds;
+
+  list.innerHTML = '';
+  orderedIds.forEach(id => {
+    const p = byId.get(id) || {};
+    const name = p.full_name || p.username || 'Пользователь';
+    const sub = p.age ? `${p.age} лет` : '';
+    const avatar = p.photo_URL && p.photo_URL !== 'user' ? p.photo_URL : DEFAULT_AVATAR;
+    const isOwner = ownerId && id === ownerId;
+
+    const a = document.createElement('a');
+    a.className = 'member-item' + (isOwner ? ' owner' : '');
+    a.href = `profile.html?id=${id}`;
+    a.innerHTML = `
+      <div class="member-avatar"><img src="${avatar}" alt="${name}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';"></div>
+      <div>
+        <div class="member-name">${name}</div>
+        <div class="member-sub">${sub}</div>
+      </div>
+      ${isOwner ? '<div class="member-badge">Создатель</div>' : ''}
+    `;
+    list.appendChild(a);
+  });
+}
+
 async function requestJoin(meeting, user) {
   if (!user) {
     const returnTo = meeting?.id ? `meeting.html?id=${meeting.id}` : 'meeting.html';
@@ -341,6 +443,7 @@ async function requestJoin(meeting, user) {
     }
     const freshUser = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
     await setupChatState(meeting, freshUser || user);
+    await renderParticipantsList(meeting, freshUser || user);
   } catch (e) {
     console.error('Ошибка отправки заявки:', e);
     showNotification('Ошибка отправки заявки');
@@ -374,6 +477,7 @@ async function approveRequest(meeting, userId) {
 
     showNotification('Пользователь добавлен');
     await setupChatState(meeting, { id: meeting.creator_id });
+    await renderParticipantsList(meeting, { id: meeting.creator_id });
   } catch (e) {
     console.error('Ошибка одобрения:', e);
     showNotification('Ошибка одобрения');
@@ -438,6 +542,7 @@ async function leaveChat(meeting, user) {
     }
     showNotification('Вы вышли из чата');
     await setupChatState(meeting, user);
+    await renderParticipantsList(meeting, user);
   } catch (e) {
     console.error('Ошибка выхода:', e);
     showNotification('Ошибка выхода');
