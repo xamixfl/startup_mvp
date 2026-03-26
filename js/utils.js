@@ -40,16 +40,10 @@ async function deleteExpiredMeeting(meetingId) {
     const chat = (chats || [])[0];
 
     if (chat && chat.id) {
-      const countResult = await api.query(TABLES.chat_messages, 'count', {}, { chat_id: chat.id });
-      const messageCount = Number(countResult && countResult.count) || 0;
-
-      if (messageCount === 0) {
-        await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id });
-        await api.delete(TABLES.chats, chat.id);
-      } else {
-        // Detach chat from meeting if it has messages.
-        await api.update(TABLES.chats, chat.id, { meeting_id: null });
-      }
+      // Keep the meeting chat intact (including messages and members)
+      // even when the corresponding meeting is deleted.
+      // This avoids преобразование чата встречи в личный чат.
+      // Не удаляем chat_members, не удаляем chat, не ставим meeting_id null.
     }
 
     await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });

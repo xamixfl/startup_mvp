@@ -205,6 +205,28 @@ async function loadChats(isRefresh = false) {
     });
 
     chats = Array.isArray(chatsRows) ? chatsRows : [];
+
+    // Filter out empty direct chats (no messages)
+    const filteredChats = [];
+    for (const chat of chats) {
+      if (chat.meeting_id) {
+        // Always show meeting chats
+        filteredChats.push(chat);
+      } else {
+        // For direct chats, check if there are messages
+        try {
+          const messages = await api.get(TABLES.chat_messages, { chat_id: chat.id, $limit: 1 });
+          if (messages && messages.length > 0) {
+            filteredChats.push(chat);
+          }
+        } catch (_e) {
+          // If can't check, include it
+          filteredChats.push(chat);
+        }
+      }
+    }
+
+    chats = filteredChats;
     await enrichChatsForUi(chats);
     renderChatList(list);
 
@@ -973,7 +995,7 @@ async function renderMeetingInfo(chat, contentEl) {
 
   const ownerId = meeting.creator_id;
   const orderedIds = ownerId ? [ownerId, ...userIds.filter(id => id !== ownerId)] : userIds;
-  const canLeave = !!(currentUser && ownerId && currentUser.id !== ownerId && (memberRows || []).some(r => r.user_id === currentUser.id));
+  const canLeave = !!(currentUser && ownerId && currentUser.id !== ownerId);
 
   const participantsHtml = orderedIds.map(id => {
     const p = byId.get(id) || {};
@@ -1058,6 +1080,28 @@ async function leaveMeetingChatFromPanel(chat, meeting) {
       try {
         await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
       } catch (_e) {}
+    }
+
+    // Check remaining members in chat
+    let remainingMembers = [];
+    try {
+      const hasStatus = await chatMembersHasStatus();
+      remainingMembers = await api.get(TABLES.chat_members, hasStatus
+        ? { chat_id: chat.id, status: 'approved' }
+        : { chat_id: chat.id }
+      );
+    } catch (_e) {
+      remainingMembers = [];
+    }
+
+    // If no members remain, delete the chat
+    if (remainingMembers.length === 0) {
+      try {
+        await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id });
+        await api.delete(TABLES.chats, chat.id);
+      } catch (_e) {
+        // Ignore delete errors
+      }
     }
 
     // Refresh chat list and close the current chat view
