@@ -41,6 +41,15 @@ function getLocalMeetings() {
   const raw = localStorage.getItem('pulse_meetings');
   if (!raw) return [];
   try {
+    const ensureMembership = async (chatId, userId, role = 'member') => {
+      const existing = await api.get(TABLES.chat_members, { chat_id: chatId, user_id: userId });
+      if ((existing || []).length > 0) return;
+      try {
+        await api.insert(TABLES.chat_members, { chat_id: chatId, user_id: userId, role, status: 'approved' });
+      } catch (_e) {
+        await api.insert(TABLES.chat_members, { chat_id: chatId, user_id: userId });
+      }
+    };
     const list = JSON.parse(raw);
     return Array.isArray(list) ? list : [];
   } catch (_e) {
@@ -170,6 +179,34 @@ async function createDirectChat(profile) {
     }
 
     const title = profile.full_name || profile.username || 'Чат';
+    const pairChats = await api.get(TABLES.chats, {
+      meeting_id: null,
+      owner_id: { in: [currentUser.id, profile.id] },
+      peer_id: { in: [currentUser.id, profile.id] }
+    });
+    const archivedDirect = (pairChats || []).find(chat =>
+      !chat.meeting_id
+      && (
+        (chat.owner_id === currentUser.id && chat.peer_id === profile.id)
+        || (chat.owner_id === profile.id && chat.peer_id === currentUser.id)
+      )
+    );
+
+    if (archivedDirect?.id) {
+      await ensureMembership(
+        archivedDirect.id,
+        currentUser.id,
+        archivedDirect.owner_id === currentUser.id ? 'owner' : 'member'
+      );
+      await ensureMembership(
+        archivedDirect.id,
+        profile.id,
+        archivedDirect.owner_id === profile.id ? 'owner' : 'member'
+      );
+      window.location.href = `chat.html?chat_id=${archivedDirect.id}`;
+      return;
+    }
+
     const inserted = await api.insert(TABLES.chats, {
       meeting_id: null,
       title,
