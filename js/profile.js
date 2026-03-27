@@ -1,4 +1,4 @@
-// Topics will be fetched from database
+﻿// Topics will be fetched from database
 let TOPICS = [];
 let currentUser = null;
 let viewedProfile = null;
@@ -6,6 +6,17 @@ let isCurrentUserAdmin = false;
 let editInterestMenuOpen = false;
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
+
+async function ensureMembership(chatId, userId, role = 'member') {
+  const { TABLES } = window.APP || {};
+  const existing = await api.get(TABLES.chat_members, { chat_id: chatId, user_id: userId });
+  if ((existing || []).length > 0) return;
+  try {
+    await api.insert(TABLES.chat_members, { chat_id: chatId, user_id: userId, role, status: 'approved' });
+  } catch (_e) {
+    await api.insert(TABLES.chat_members, { chat_id: chatId, user_id: userId });
+  }
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
@@ -41,15 +52,6 @@ function getLocalMeetings() {
   const raw = localStorage.getItem('pulse_meetings');
   if (!raw) return [];
   try {
-    const ensureMembership = async (chatId, userId, role = 'member') => {
-      const existing = await api.get(TABLES.chat_members, { chat_id: chatId, user_id: userId });
-      if ((existing || []).length > 0) return;
-      try {
-        await api.insert(TABLES.chat_members, { chat_id: chatId, user_id: userId, role, status: 'approved' });
-      } catch (_e) {
-        await api.insert(TABLES.chat_members, { chat_id: chatId, user_id: userId });
-      }
-    };
     const list = JSON.parse(raw);
     return Array.isArray(list) ? list : [];
   } catch (_e) {

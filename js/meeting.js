@@ -382,6 +382,7 @@ async function renderParticipantsList(meeting, user) {
 
   const ownerId = meeting.creator_id || null;
   const orderedIds = ownerId ? [ownerId, ...userIds.filter(id => id !== ownerId)] : userIds;
+  const canManageParticipants = !!(user && ownerId && user.id === ownerId);
 
   list.innerHTML = '';
   orderedIds.forEach(id => {
@@ -390,6 +391,8 @@ async function renderParticipantsList(meeting, user) {
     const sub = p.age ? `${p.age} лет` : '';
     const avatar = p.photo_URL && p.photo_URL !== 'user' ? p.photo_URL : DEFAULT_AVATAR;
     const isOwner = ownerId && id === ownerId;
+    const row = document.createElement('div');
+    row.className = 'member-row';
 
     const a = document.createElement('a');
     a.className = 'member-item' + (isOwner ? ' owner' : '');
@@ -402,8 +405,65 @@ async function renderParticipantsList(meeting, user) {
       </div>
       ${isOwner ? '<div class="member-badge">Создатель</div>' : ''}
     `;
-    list.appendChild(a);
+    row.appendChild(a);
+
+    if (canManageParticipants && !isOwner) {
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'member-remove';
+      removeBtn.textContent = 'Удалить';
+      removeBtn.onclick = async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await removeParticipantFromMeetingPage(meeting, user, id, name);
+      };
+      row.appendChild(removeBtn);
+    }
+
+    list.appendChild(row);
   });
+}
+
+async function removeParticipantFromMeetingPage(meeting, user, memberId, memberName) {
+  if (!meeting || !user || user.id !== meeting.creator_id) return;
+  if (!memberId || memberId === meeting.creator_id) return;
+
+  const confirmed = confirm(`Удалить ${memberName} из встречи?`);
+  if (!confirmed) return;
+
+  try {
+    let shouldDecrement = true;
+    if (meeting.chat_id) {
+      const hasStatus = await chatMembersHasStatus();
+      if (hasStatus) {
+        const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: memberId });
+        const membership = (rows || [])[0] || null;
+        shouldDecrement = membership?.status === 'approved';
+      }
+      await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: memberId });
+    }
+
+    await removeParticipantRecord(meeting.id, memberId);
+
+    if (shouldDecrement) {
+      const currentSlots = Number(meeting.current_slots || 0);
+      const nextSlots = Math.max(currentSlots - 1, 0);
+      await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
+      meeting.current_slots = nextSlots;
+    }
+
+    if (meeting.chat_id) {
+      await window.postChatSystemMessage?.(meeting.chat_id, `${memberName} удалён из встречи`, memberId);
+    }
+
+    showNotification('Участник удалён');
+    renderMeeting(meeting, user);
+    await setupChatState(meeting, user);
+    await renderParticipantsList(meeting, user);
+  } catch (error) {
+    console.error('Ошибка удаления участника со страницы встречи:', error);
+    showNotification('Ошибка удаления участника');
+  }
 }
 
 async function requestJoin(meeting, user) {
@@ -553,7 +613,7 @@ async function rejectRequest(meeting, userId) {
 }
 
 async function leaveChat(meeting, user) {
-  const confirmLeave = confirm('�������� ��� �������?');
+  const confirmLeave = confirm('Покинуть чат встречи?');
   if (!confirmLeave) return;
   try {
     let shouldDecrement = true;
@@ -566,8 +626,8 @@ async function leaveChat(meeting, user) {
       }
     } catch (_e) {}
 
-    const userName = user.full_name || user.username || '������������';
-    await window.postChatSystemMessage?.(meeting.chat_id, `${userName} ������� ��� �������`, user.id);
+    const userName = user.full_name || user.username || 'Пользователь';
+    await window.postChatSystemMessage?.(meeting.chat_id, `${userName} покинул чат встречи`, user.id);
 
     await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: user.id });
     if (shouldDecrement) {
@@ -578,12 +638,12 @@ async function leaveChat(meeting, user) {
     }
     await removeParticipantRecord(meeting.id, user.id);
 
-    showNotification('�� ����� �� ����');
+    showNotification('Вы вышли из чата');
     await setupChatState(meeting, user);
     await renderParticipantsList(meeting, user);
   } catch (e) {
-    console.error('������ ������:', e);
-    showNotification('������ ������');
+    console.error('Ошибка выхода:', e);
+    showNotification('Ошибка выхода');
   }
 }
 function showNotification(message) {

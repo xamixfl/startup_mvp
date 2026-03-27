@@ -393,6 +393,16 @@
             background: #fff;
         }
 
+        .member-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .member-row .member-item {
+            flex: 1;
+        }
+
         .member-item.owner {
             border-color: #93c5fd;
             background: #eff6ff;
@@ -435,6 +445,22 @@
             background: #dbeafe;
             color: #1d4ed8;
             white-space: nowrap;
+        }
+
+        .member-remove {
+            border: none;
+            border-radius: 10px;
+            background: #fee2e2;
+            color: #b91c1c;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .member-remove:hover {
+            background: #fecaca;
         }
     </style>
 </head>
