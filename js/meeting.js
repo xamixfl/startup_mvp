@@ -13,6 +13,14 @@ async function fetchUserName(userId) {
 
 let TOPICS = [];
 
+function isMeetingFull(meeting) {
+  if (!meeting) return false;
+  const maxSlots = Number(meeting.max_slots) || 0;
+  if (maxSlots <= 0) return false;
+  const currentSlots = Number(meeting.current_slots || meeting.participants_count || 0);
+  return currentSlots >= maxSlots;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
   const user = typeof window.getCurrentUser === 'function'
@@ -199,11 +207,23 @@ async function setupChatState(meeting, user) {
   const requestsCard = document.getElementById('requests-card');
   const requestsList = document.getElementById('requests-list');
   const joinButton = document.getElementById('join-button');
+  const joinUnavailable = document.getElementById('join-unavailable');
+  const meetingFull = isMeetingFull(meeting);
+
+  const showJoinAction = () => {
+    if (joinButton) joinButton.style.display = meetingFull ? 'none' : '';
+    if (joinUnavailable) joinUnavailable.style.display = meetingFull ? 'block' : 'none';
+  };
+
+  const hideJoinAction = () => {
+    if (joinButton) joinButton.style.display = 'none';
+    if (joinUnavailable) joinUnavailable.style.display = 'none';
+  };
 
   if (!meeting.chat_id || !user) {
     if (statusCard) statusCard.style.display = 'none';
     if (requestsCard) requestsCard.style.display = 'none';
-    if (joinButton) joinButton.style.display = '';
+    showJoinAction();
     // Not logged in or chat missing -> hide members list
     const membersCard = document.getElementById('participants-list-card');
     if (membersCard) membersCard.style.display = 'none';
@@ -223,13 +243,13 @@ async function setupChatState(meeting, user) {
     statusCard.style.display = 'block';
     if (!membership) {
       statusText.textContent = 'Вы не отправляли заявку.';
-      if (joinButton) joinButton.style.display = '';
+      showJoinAction();
     } else if (hasStatus && membership.status === 'pending') {
       statusText.textContent = 'Заявка отправлена, ожидает одобрения.';
-      if (joinButton) joinButton.style.display = 'none';
+      hideJoinAction();
     } else if (!hasStatus || membership.status === 'approved') {
       statusText.textContent = meeting.creator_id === user.id ? 'Вы создатель встречи.' : 'Вы участник чата.';
-      if (joinButton) joinButton.style.display = 'none';
+      hideJoinAction();
       if (openBtn) {
         openBtn.style.display = 'block';
         openBtn.onclick = () => { window.location.href = `chat.html?chat_id=${meeting.chat_id}`; };
@@ -242,7 +262,7 @@ async function setupChatState(meeting, user) {
       }
     } else if (hasStatus && membership.status === 'rejected') {
       statusText.textContent = 'Заявка отклонена.';
-      if (joinButton) joinButton.style.display = 'none';
+      hideJoinAction();
     }
   }
 
@@ -390,6 +410,11 @@ async function requestJoin(meeting, user) {
   if (!user) {
     const returnTo = meeting?.id ? `meeting.html?id=${meeting.id}` : 'meeting.html';
     window.location.href = `login.html?next=${encodeURIComponent(returnTo)}`;
+    return;
+  }
+  if (isMeetingFull(meeting)) {
+    showNotification('Свободных мест сейчас нет');
+    await setupChatState(meeting, user);
     return;
   }
   if (!meeting.chat_id) {
