@@ -53,6 +53,56 @@ function getRenderedKeySet(chatId) {
   return renderedMessageKeysByChat.get(chatId);
 }
 
+function getChatActivityAt(chat) {
+  return chat?.__lastActivityAt || chat?.created_at || null;
+}
+
+function sortChatsByActivity(chatList) {
+  chatList.sort((a, b) => {
+    const aTime = new Date(getChatActivityAt(a) || 0).getTime();
+    const bTime = new Date(getChatActivityAt(b) || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+async function hydrateChatActivity(chatList) {
+  await Promise.all((chatList || []).map(async (chat) => {
+    if (!chat?.id) return;
+    chat.__lastActivityAt = chat.created_at || null;
+    try {
+      let lastMessages = [];
+      try {
+        lastMessages = await api.get(TABLES.chat_messages, {
+          chat_id: chat.id,
+          $order: { column: 'created_at', ascending: false },
+          $limit: 1
+        });
+      } catch (_e) {
+        lastMessages = await api.get(TABLES.chat_messages, { chat_id: chat.id, $limit: 1 });
+        lastMessages = (lastMessages || []).sort((x, y) =>
+          new Date(getMsgCreatedAt(y) || 0).getTime() - new Date(getMsgCreatedAt(x) || 0).getTime()
+        );
+      }
+      const lastAt = getMsgCreatedAt((lastMessages || [])[0]);
+      if (lastAt) {
+        chat.__lastActivityAt = lastAt;
+      }
+    } catch (_e) {
+      // keep chat.created_at as fallback activity timestamp
+    }
+  }));
+}
+
+function refreshChatListOrder() {
+  const list = document.getElementById('chat-list');
+  if (!list) return;
+  sortChatsByActivity(chats);
+  renderChatList(list);
+  if (currentChat?.id) {
+    highlightActiveChat(currentChat.id);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   currentUser = typeof window.getCurrentUser === 'function'
     ? await window.getCurrentUser()
@@ -226,6 +276,8 @@ async function loadChats(isRefresh = false) {
     chats = Array.isArray(chatsRows) ? chatsRows : [];
 
     await enrichChatsForUi(chats);
+    await hydrateChatActivity(chats);
+    sortChatsByActivity(chats);
     renderChatList(list);
 
     const pendingId = window.__pendingOpenChatId;
@@ -542,8 +594,12 @@ async function pollNewMessages(chatId) {
     currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, lastAt);
     openedChatReadAt[chatId] = isoMax(openedChatReadAt[chatId], lastAt);
     markChatRead(chatId, lastAt);
+    if (currentChat?.id === chatId) {
+      currentChat.__lastActivityAt = lastAt;
+    }
   }
 
+  refreshChatListOrder();
   if (wasAtBottom) body.scrollTop = body.scrollHeight;
   updateChatListUnreadBadges().catch(() => {});
 }
@@ -715,8 +771,10 @@ function setupSendMessage() {
         currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, at);
         openedChatReadAt[currentChat.id] = isoMax(openedChatReadAt[currentChat.id], currentChatLastCreatedAt);
         markChatRead(currentChat.id, currentChatLastCreatedAt);
+        currentChat.__lastActivityAt = at;
       }
 
+      refreshChatListOrder();
       updateChatListUnreadBadges().catch(() => {});
     } catch (error) {
       console.error('Ошибка отправки сообщения:', error);
@@ -813,8 +871,10 @@ async function uploadAndSendImage(file) {
       currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, at);
       openedChatReadAt[currentChat.id] = isoMax(openedChatReadAt[currentChat.id], currentChatLastCreatedAt);
       markChatRead(currentChat.id, currentChatLastCreatedAt);
+      currentChat.__lastActivityAt = at;
     }
 
+    refreshChatListOrder();
     updateChatListUnreadBadges().catch(() => {});
   } catch (error) {
     console.error('Ошибка отправки изображения:', error);
