@@ -1,6 +1,16 @@
 const { TABLES } = window.APP || {};
 const DEFAULT_AVATAR = 'assets/avatar.png';
 
+async function fetchUserName(userId) {
+  if (!userId) return 'Пользователь';
+  try {
+    const profile = await api.getOne(TABLES.profiles, userId);
+    return profile?.full_name || profile?.username || 'Пользователь';
+  } catch (_e) {
+    return 'Пользователь';
+  }
+}
+
 let TOPICS = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -68,6 +78,8 @@ function renderMeeting(meeting, _user) {
 
   const titleEl = document.getElementById('meeting-headline');
   if (titleEl) titleEl.textContent = meeting.title || 'Без названия';
+  const countdownEl = document.getElementById('meeting-countdown');
+  if (countdownEl) countdownEl.textContent = buildMeetingCountdownLabel(meeting.expires_at);
   const detailsEl = document.getElementById('meeting-details');
   if (detailsEl) detailsEl.textContent = meeting.full_description || 'Подробное описание появится позже.';
 
@@ -465,6 +477,7 @@ async function approveRequest(meeting, userId) {
     await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
     meeting.current_slots = currentSlots + 1;
 
+    const senderName = await fetchUserName(userId);
     if (userId && typeof window.createUserNotification === 'function') {
       await window.createUserNotification(userId, {
         notification_type: 'event_join_approved',
@@ -473,6 +486,10 @@ async function approveRequest(meeting, userId) {
         title: 'Заявка одобрена',
         message: `Организатор добавил вас во встречу «${meeting.title || 'Встреча'}».`
       });
+    }
+
+    if (meeting.chat_id) {
+      await window.postChatSystemMessage?.(meeting.chat_id, `${senderName} присоединился к чату встречи`, userId);
     }
 
     showNotification('Пользователь добавлен');
@@ -533,13 +550,9 @@ async function leaveChat(meeting, user) {
       meeting.current_slots = nextSlots;
     }
     await removeParticipantRecord(meeting.id, user.id);
+    const userName = user.full_name || user.username || 'Пользователь';
+    await window.postChatSystemMessage?.(meeting.chat_id, `${userName} покинул чат встречи`, user.id);
 
-    if (shouldDecrement) {
-      const currentSlots = meeting.current_slots || 1;
-      const nextSlots = Math.max(currentSlots - 1, 0);
-      await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
-      meeting.current_slots = nextSlots;
-    }
     showNotification('Вы вышли из чата');
     await setupChatState(meeting, user);
     await renderParticipantsList(meeting, user);

@@ -5,6 +5,15 @@ let allMeetings = [];
 let currentProfile = null;
 const DEFAULT_AVATAR = 'assets/avatar.png';
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 let TOPICS = [];
 
 const selectedTopics = new Set();
@@ -347,6 +356,7 @@ function renderMeetings(meetings) {
     const topicLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
     const locationLabel = meeting.location || 'Город не указан';
 
+    const countdownLabel = buildMeetingCountdownLabel(meeting.expires_at);
     const meetingCard = document.createElement('div');
     meetingCard.className = 'meeting-card';
     meetingCard.onclick = () => {
@@ -370,6 +380,7 @@ function renderMeetings(meetings) {
           </div>
         </div>
       </div>
+      <div class="meeting-countdown">${escapeHtml(countdownLabel)}</div>
     `;
     feed.appendChild(meetingCard);
   });
@@ -592,8 +603,8 @@ async function joinMeeting(meetingId) {
     await api.insert(TABLES.participants, { meeting_id: meetingId, user_id: currentUser.id });
     await api.update(TABLES.meetings, meetingId, { current_slots: (meeting.current_slots || 0) + 1 });
 
+    const senderName = currentProfile?.full_name || currentProfile?.username || currentUser.email || 'Пользователь';
     if (meeting.creator_id && meeting.creator_id !== currentUser.id && typeof window.createUserNotification === 'function') {
-      const senderName = currentProfile?.full_name || currentProfile?.username || currentUser.email || 'Пользователь';
       await window.createUserNotification(meeting.creator_id, {
         notification_type: 'event_joined_direct',
         related_table: 'meetings',
@@ -601,6 +612,10 @@ async function joinMeeting(meetingId) {
         title: 'Новый участник встречи',
         message: `${senderName} присоединился к встрече «${meeting.title || 'Встреча'}».`
       });
+    }
+
+    if (meeting.chat_id) {
+      await window.postChatSystemMessage?.(meeting.chat_id, `${senderName} присоединился к чату встречи`, currentUser.id);
     }
 
     showNotification('Вы присоединились к встрече!');

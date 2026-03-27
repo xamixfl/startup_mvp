@@ -40,10 +40,8 @@ async function deleteExpiredMeeting(meetingId) {
     const chat = (chats || [])[0];
 
     if (chat && chat.id) {
-      // Keep the meeting chat intact (including messages and members)
-      // even when the corresponding meeting is deleted.
-      // This avoids преобразование чата встречи в личный чат.
-      // Не удаляем chat_members, не удаляем chat, не ставим meeting_id null.
+      // Keep the meeting chat intact even after the meeting is deleted.
+      // This prevents turning a meeting chat into a broken direct chat.
     }
 
     await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });
@@ -51,6 +49,29 @@ async function deleteExpiredMeeting(meetingId) {
   } catch (error) {
     console.error('Error deleting expired meeting:', meetingId, error);
   }
+}
+
+function formatMeetingCountdown(isoString) {
+  if (!isoString) return 'Срок не указан';
+  const target = new Date(isoString);
+  if (Number.isNaN(target.getTime())) return 'Срок не указан';
+  const diffMs = target.getTime() - Date.now();
+  if (diffMs <= 0) return 'Событие завершено';
+
+  const days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  const minutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000));
+  const parts = [];
+  if (days) parts.push(`${days} д`);
+  if (hours) parts.push(`${hours} ч`);
+  if (!days && !hours) parts.push(`${minutes} мин`);
+  return parts.join(' ');
+}
+
+function buildMeetingCountdownLabel(expiresAt) {
+  const raw = formatMeetingCountdown(expiresAt);
+  if (!raw) return '';
+  return `\u23f1 ${raw}`;
 }
 
 async function createUserNotification(recipientId, payload = {}) {
@@ -77,9 +98,25 @@ async function createUserNotification(recipientId, payload = {}) {
   }
 }
 
+async function postChatSystemMessage(chatId, message, actorId) {
+  const { TABLES } = window.APP || {};
+  if (!chatId || !message || !TABLES?.chat_messages) return null;
+  const payload = { chat_id: chatId, content: `system:${message}` };
+  if (actorId) payload.user_id = actorId;
+  try {
+    const rows = await api.insert(TABLES.chat_messages, payload);
+    return Array.isArray(rows) ? rows[0] || null : null;
+  } catch (error) {
+    console.warn('postChatSystemMessage failed:', error);
+    return null;
+  }
+}
+
 window.fetchTopics = fetchTopics;
 window.getCurrentUser = getCurrentUser;
 window.cleanupExpiredMeetings = cleanupExpiredMeetings;
 window.deleteExpiredMeeting = deleteExpiredMeeting;
 window.createUserNotification = createUserNotification;
-
+window.postChatSystemMessage = postChatSystemMessage;
+window.formatMeetingCountdown = formatMeetingCountdown;
+window.buildMeetingCountdownLabel = buildMeetingCountdownLabel;

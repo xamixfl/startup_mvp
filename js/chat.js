@@ -20,6 +20,24 @@ let currentChatLastCreatedAt = null;
 let openedChatReadAt = {};
 const renderedMessageKeysByChat = new Map();
 
+function showNotification(message) {
+  const notification = document.getElementById('notification');
+  if (!notification) return;
+  notification.textContent = message;
+  notification.style.display = 'block';
+  setTimeout(() => {
+    notification.style.display = 'none';
+  }, 2500);
+}
+
+function notifyUser(message) {
+  if (typeof showNotification === 'function') {
+    showNotification(message);
+    return;
+  }
+  alert(message);
+}
+
 function isoMax(a, b) {
   if (!a) return b || null;
   if (!b) return a || null;
@@ -206,27 +224,6 @@ async function loadChats(isRefresh = false) {
 
     chats = Array.isArray(chatsRows) ? chatsRows : [];
 
-    // Filter out empty direct chats (no messages)
-    const filteredChats = [];
-    for (const chat of chats) {
-      if (chat.meeting_id) {
-        // Always show meeting chats
-        filteredChats.push(chat);
-      } else {
-        // For direct chats, check if there are messages
-        try {
-          const messages = await api.get(TABLES.chat_messages, { chat_id: chat.id, $limit: 1 });
-          if (messages && messages.length > 0) {
-            filteredChats.push(chat);
-          }
-        } catch (_e) {
-          // If can't check, include it
-          filteredChats.push(chat);
-        }
-      }
-    }
-
-    chats = filteredChats;
     await enrichChatsForUi(chats);
     renderChatList(list);
 
@@ -552,26 +549,35 @@ async function pollNewMessages(chatId) {
 
 function renderMessage(msg, profile, mine) {
   const wrap = document.createElement('div');
-  wrap.className = 'message' + (mine ? ' mine' : '');
+
+  const rawContent = String(msg.content || '');
+  const isSystem = rawContent.startsWith('system:');
+  const bodyContent = isSystem ? rawContent.slice('system:'.length).trim() : rawContent;
+  if (isSystem) {
+    wrap.className = 'message system';
+    wrap.innerHTML = `<div class="message-content">${escapeHtml(bodyContent)}</div>`;
+    return wrap;
+  }
+  const isImage = !isSystem && bodyContent.startsWith('image:');
+  const payload = isImage ? bodyContent.slice('image:'.length) : bodyContent;
+  const classes = ['message'];
+  if (mine) classes.push('mine');
+  wrap.className = classes.join(' ');
 
   const senderName = mine ? 'Вы' : (profile?.full_name || profile?.username || 'Пользователь');
-
-  const content = String(msg.content || '');
-  const isImage = content.startsWith('image:');
-  const payload = isImage ? content.slice('image:'.length) : content;
-
   const avatarUrl = profile?.photo_URL && profile.photo_URL !== 'user' ? profile.photo_URL : DEFAULT_AVATAR;
-
   const fullWhen = formatMessageDateTime(msg.created_at);
   const shortWhen = formatMessageTime(msg.created_at);
-  const metaHtml = mine
-    ? `<div class="message-sender">${escapeHtml(senderName)}</div>`
-    : `<div class="message-avatar"><img src="${avatarUrl}" alt="${escapeHtml(senderName)}"></div>
-      <div class="message-sender">${escapeHtml(senderName)}</div>`;
+  const profileId = profile?.id || msg.user_id;
+  const nameHtml = profileId
+    ? `<a href="profile.html?id=${escapeHtml(profileId)}" class="message-sender">${escapeHtml(senderName)}</a>`
+    : `<span class="message-sender">${escapeHtml(senderName)}</span>`;
+  const avatarHtml = mine ? '' : `<div class="message-avatar"><img src="${avatarUrl}" alt="${escapeHtml(senderName)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';"></div>`;
 
   wrap.innerHTML = `
     <div class="message-meta">
-    ${metaHtml}
+      ${avatarHtml}
+      ${nameHtml}
     </div>
     <div class="message-content"></div>
     <div class="message-time" title="${escapeHtml(fullWhen)}">${escapeHtml(shortWhen)}</div>
@@ -586,7 +592,7 @@ function renderMessage(msg, profile, mine) {
         img.addEventListener('click', () => openImageModal(payload));
       }
     } else {
-      contentEl.textContent = payload;
+      contentEl.textContent = bodyContent;
     }
   }
 
@@ -834,6 +840,39 @@ function openImageModal(url) {
   modal.style.display = 'flex';
 }
 
+async function clearDirectChat(forEveryone) {
+  if (!currentChat || currentChat.meeting_id) return;
+  const chatId = currentChat.id;
+  const prompt = forEveryone
+    ? 'Удалить чат у всех участников? Это действие уберёт историю и закроет переписку для собеседника.'
+    : 'Удалить чат только у себя? Вы сможете начать переписку заново позже.';
+  if (!confirm(prompt)) return;
+
+  try {
+    if (forEveryone) {
+      await api.query(TABLES.chat_messages, 'deleteWhere', {}, { chat_id: chatId });
+      await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chatId });
+      await api.delete(TABLES.chats, chatId);
+    } else {
+      await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chatId, user_id: currentUser.id });
+    }
+
+    delete openedChatReadAt[chatId];
+    currentChat = null;
+    currentChatLastCreatedAt = null;
+    renderedMessageKeysByChat.delete(chatId);
+    renderEmptyChat('Выберите чат слева');
+    stopMessagePolling();
+    stopTypingPolling();
+    await loadChats(true);
+    toggleInfoPanel(false);
+    notifyUser('Чат очищен');
+  } catch (error) {
+    console.error('Ошибка очищения чата:', error);
+    alert('Не удалось очистить чат');
+  }
+}
+
 function setupTypingIndicator() {
   const input = document.getElementById('chat-input');
   if (!input) return;
@@ -995,7 +1034,8 @@ async function renderMeetingInfo(chat, contentEl) {
 
   const ownerId = meeting.creator_id;
   const orderedIds = ownerId ? [ownerId, ...userIds.filter(id => id !== ownerId)] : userIds;
-  const canLeave = !!(currentUser && ownerId && currentUser.id !== ownerId);
+  const canLeave = !!(currentUser && ownerId);
+  const canManageParticipants = !!(currentUser && ownerId && currentUser.id === ownerId);
 
   const participantsHtml = orderedIds.map(id => {
     const p = byId.get(id) || {};
@@ -1003,15 +1043,21 @@ async function renderMeetingInfo(chat, contentEl) {
     const age = p.age ? `${p.age} лет` : '';
     const avatar = p.photo_URL && p.photo_URL !== 'user' ? p.photo_URL : DEFAULT_AVATAR;
     const isOwner = ownerId && id === ownerId;
+    const removeButton = canManageParticipants && !isOwner
+      ? `<button type="button" class="member-remove" data-user-id="${escapeHtml(id)}" data-user-name="${escapeHtml(name)}">Удалить</button>`
+      : '';
     return `
-      <a class="participant-item ${isOwner ? 'owner' : ''}" href="profile.html?id=${escapeHtml(id)}">
-        <img class="participant-avatar" src="${escapeHtml(avatar)}" alt="${escapeHtml(name)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
-        <div>
-          <div class="participant-name">${escapeHtml(name)}</div>
-          <div class="participant-age">${escapeHtml(age)}</div>
-        </div>
-        ${isOwner ? '<div class="participant-badge">Создатель</div>' : ''}
-      </a>
+      <div class="participant-item-row ${isOwner ? 'owner' : ''}">
+        <a class="member-link" href="profile.html?id=${escapeHtml(id)}">
+          <img class="participant-avatar" src="${escapeHtml(avatar)}" alt="${escapeHtml(name)}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}';">
+          <div>
+            <div class="participant-name">${escapeHtml(name)}</div>
+            <div class="participant-age">${escapeHtml(age)}</div>
+          </div>
+          ${isOwner ? '<div class="participant-badge">Создатель</div>' : ''}
+        </a>
+        ${removeButton}
+      </div>
     `;
   }).join('');
 
@@ -1034,7 +1080,7 @@ async function renderMeetingInfo(chat, contentEl) {
       <div class="info-age">${escapeHtml(creatorAge)}</div>
       <div class="info-actions">
         <button type="button" class="info-btn secondary" onclick="window.location.href='meeting.html?id=${escapeHtml(meeting.id)}'">Открыть встречу</button>
-        ${canLeave ? `<button type="button" class="info-btn danger" id="info-leave-btn">Покинуть чат</button>` : ''}
+        ${canLeave ? `<button type="button" class="info-btn danger" id="info-leave-btn">Выйти из чата</button>` : ''}
       </div>
     </div>
     <div>
@@ -1052,6 +1098,52 @@ async function renderMeetingInfo(chat, contentEl) {
         await leaveMeetingChatFromPanel(chat, meeting);
       };
     }
+  }
+
+  if (canManageParticipants) {
+    contentEl.querySelectorAll('.member-remove').forEach(btn => {
+      btn.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const memberId = btn.dataset.userId;
+        const memberName = btn.dataset.userName || 'Участник';
+        if (!memberId) return;
+        await removeParticipantFromInfoPanel(chat, meeting, memberId, memberName, contentEl);
+      });
+    });
+  }
+}
+
+async function removeParticipantFromInfoPanel(chat, meeting, memberId, memberName, contentEl) {
+  if (!currentUser || !chat || !meeting || currentUser.id !== meeting.creator_id) return;
+  if (!memberId || memberId === meeting.creator_id) return;
+  const confirmLeave = confirm(`Удалить ${memberName} из чата?`);
+  if (!confirmLeave) return;
+
+  try {
+    const hasStatus = await chatMembersHasStatus();
+    let shouldDecrement = true;
+    if (hasStatus) {
+      const rows = await api.get(TABLES.chat_members, { chat_id: chat.id, user_id: memberId });
+      const membership = (rows || [])[0];
+      shouldDecrement = (membership && membership.status === 'approved');
+    }
+
+    await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id, user_id: memberId });
+    await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meeting.id, user_id: memberId });
+
+    if (shouldDecrement) {
+      const currentSlots = meeting.current_slots || 1;
+      const nextSlots = Math.max(currentSlots - 1, 0);
+      await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
+      meeting.current_slots = nextSlots;
+    }
+
+    await window.postChatSystemMessage?.(chat.id, `${memberName} покинул чат встречи`, memberId);
+    await renderMeetingInfo(chat, contentEl);
+    await loadChats(true);
+  } catch (error) {
+    console.error('Ошибка удаления участника:', error);
+    alert('Не удалось удалить участника');
   }
 }
 
@@ -1082,6 +1174,9 @@ async function leaveMeetingChatFromPanel(chat, meeting) {
       } catch (_e) {}
     }
 
+    const currentUserName = currentUser.full_name || currentUser.username || 'Пользователь';
+    await window.postChatSystemMessage?.(chat.id, `${currentUserName} покинул чат встречи`, currentUser.id);
+
     // Check remaining members in chat
     let remainingMembers = [];
     try {
@@ -1094,13 +1189,24 @@ async function leaveMeetingChatFromPanel(chat, meeting) {
       remainingMembers = [];
     }
 
-    // If no members remain, delete the chat
+    // If no members remain, delete the chat (and meeting if owner left)
     if (remainingMembers.length === 0) {
       try {
         await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id });
         await api.delete(TABLES.chats, chat.id);
+        renderedMessageKeysByChat.delete(chat.id);
+        if (meeting.id) {
+          try {
+            await api.delete(TABLES.meetings, meeting.id);
+          } catch (_e) {
+            // ignore meeting deletion errors
+          }
+        }
       } catch (_e) {
         // Ignore delete errors
+      }
+      if (meeting.id) {
+        notifyUser('Встреча удалена');
       }
     }
 
@@ -1164,8 +1270,21 @@ async function renderDirectInfo(chat, contentEl) {
       <div class="info-actions">
         <button type="button" class="info-btn secondary" onclick="window.location.href='profile.html?id=${escapeHtml(peer.id)}'">Открыть профиль</button>
       </div>
+      <div class="direct-clear-actions">
+        <button type="button" class="info-btn secondary" id="clear-chat-local">Очистить только у себя</button>
+        <button type="button" class="info-btn danger" id="clear-chat-all">Очистить у всех</button>
+      </div>
     </div>
   `;
+
+  const localBtn = contentEl.querySelector('#clear-chat-local');
+  if (localBtn) {
+    localBtn.onclick = () => clearDirectChat(false);
+  }
+  const globalBtn = contentEl.querySelector('#clear-chat-all');
+  if (globalBtn) {
+    globalBtn.onclick = () => clearDirectChat(true);
+  }
 }
 
 function escapeHtml(value) {

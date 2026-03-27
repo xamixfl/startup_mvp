@@ -219,6 +219,42 @@
       box-shadow: 0 8px 24px rgba(148, 163, 184, 0.08);
     }
 
+    .message.system {
+      align-self: center;
+      max-width: 60%;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-weight: 600;
+      color: #475569;
+      box-shadow: none;
+      text-align: center;
+    }
+
+    .message.system .message-meta,
+    .message.system .message-time {
+      display: none;
+    }
+
+    .message.system {
+      background: #f8fafc;
+      border-color: #dbe4f0;
+    }
+
+    .message.system.mine {
+      align-self: center;
+      background: #f8fafc;
+      border-color: #dbe4f0;
+    }
+
+    .message.system .message-content {
+      color: #475569;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
     .message.mine {
       align-self: flex-end;
       background: #dbeafe;
@@ -498,6 +534,13 @@
       width: 100%;
     }
 
+    .direct-clear-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      width: 100%;
+    }
+
     .info-btn {
       flex: 1;
       border: none;
@@ -654,6 +697,45 @@
       object-fit: cover;
       border: 1px solid #e2e8f0;
       background: #f1f5f9;
+    }
+
+    .participant-item-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: #fff;
+    }
+
+    .participant-item-row.owner {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+
+    .participant-item-row .member-link {
+      display: flex;
+      flex: 1;
+      align-items: center;
+      gap: 10px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .participant-item-row .member-remove {
+      border: none;
+      background: #fee2e2;
+      color: #b91c1c;
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .participant-item-row .member-remove:hover {
+      background: #fecaca;
     }
 
     .participant-name {
