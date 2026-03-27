@@ -1,4 +1,4 @@
-const { TABLES } = window.APP || {};
+﻿const { TABLES } = window.APP || {};
 const DEFAULT_AVATAR = 'assets/avatar.png';
 
 async function fetchUserName(userId) {
@@ -528,7 +528,7 @@ async function rejectRequest(meeting, userId) {
 }
 
 async function leaveChat(meeting, user) {
-  const confirmLeave = confirm('Покинуть чат встречи?');
+  const confirmLeave = confirm('�������� ��� �������?');
   if (!confirmLeave) return;
   try {
     let shouldDecrement = true;
@@ -537,10 +537,12 @@ async function leaveChat(meeting, user) {
       if (hasStatus) {
         const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
         const m = (rows || [])[0];
-        // Only approved members occupy a slot.
         shouldDecrement = (m && m.status === 'approved');
       }
     } catch (_e) {}
+
+    const userName = user.full_name || user.username || '������������';
+    await window.postChatSystemMessage?.(meeting.chat_id, `${userName} ������� ��� �������`, user.id);
 
     await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: user.id });
     if (shouldDecrement) {
@@ -550,18 +552,15 @@ async function leaveChat(meeting, user) {
       meeting.current_slots = nextSlots;
     }
     await removeParticipantRecord(meeting.id, user.id);
-    const userName = user.full_name || user.username || 'Пользователь';
-    await window.postChatSystemMessage?.(meeting.chat_id, `${userName} покинул чат встречи`, user.id);
 
-    showNotification('Вы вышли из чата');
+    showNotification('�� ����� �� ����');
     await setupChatState(meeting, user);
     await renderParticipantsList(meeting, user);
   } catch (e) {
-    console.error('Ошибка выхода:', e);
-    showNotification('Ошибка выхода');
+    console.error('������ ������:', e);
+    showNotification('������ ������');
   }
 }
-
 function showNotification(message) {
   const notification = document.getElementById('notification');
   if (!notification) return;
@@ -658,4 +657,6 @@ async function ensureMeetingChat(meeting, user) {
     console.warn('ensureMeetingChat failed:', e);
   }
 }
+
+
 

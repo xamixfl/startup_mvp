@@ -1,4 +1,4 @@
-const { TABLES } = window.APP || {};
+﻿const { TABLES } = window.APP || {};
 
 let currentUser = null;
 let chats = [];
@@ -193,9 +193,10 @@ async function loadChats(isRefresh = false) {
     }
     const memberChatIds = (memberships || []).map(m => m.chat_id).filter(Boolean);
 
-    // Ensure owner chats are present
+    // Ensure owner meeting chats are present, but do not resurrect cleared direct chats.
     const ownedChats = await getOwnedChatsForUser(currentUser.id);
-    const ownedIds = (ownedChats || []).map(c => c.id).filter(Boolean);
+    const ownedMeetingChats = (ownedChats || []).filter(chat => chat && chat.meeting_id);
+    const ownedIds = ownedMeetingChats.map(c => c.id).filter(Boolean);
     const missingOwner = ownedIds.filter(id => !memberChatIds.includes(id));
     for (const chatId of missingOwner) {
       try {
@@ -1149,7 +1150,7 @@ async function removeParticipantFromInfoPanel(chat, meeting, memberId, memberNam
 
 async function leaveMeetingChatFromPanel(chat, meeting) {
   if (!currentUser || !chat || !meeting) return;
-  const ok = confirm('Покинуть чат встречи?');
+  const ok = confirm('�������� ��� �������?');
   if (!ok) return;
 
   try {
@@ -1160,6 +1161,9 @@ async function leaveMeetingChatFromPanel(chat, meeting) {
       const m = (rows || [])[0];
       shouldDecrement = (m && m.status === 'approved');
     }
+
+    const currentUserName = currentUser.full_name || currentUser.username || '������������';
+    await window.postChatSystemMessage?.(chat.id, `${currentUserName} ������� ��� �������`, currentUser.id);
 
     await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id, user_id: currentUser.id });
     try {
@@ -1174,14 +1178,10 @@ async function leaveMeetingChatFromPanel(chat, meeting) {
       } catch (_e) {}
     }
 
-    const currentUserName = currentUser.full_name || currentUser.username || 'Пользователь';
-    await window.postChatSystemMessage?.(chat.id, `${currentUserName} покинул чат встречи`, currentUser.id);
-
-    // Check remaining members in chat
     let remainingMembers = [];
     try {
-      const hasStatus = await chatMembersHasStatus();
-      remainingMembers = await api.get(TABLES.chat_members, hasStatus
+      const hasStatusNow = await chatMembersHasStatus();
+      remainingMembers = await api.get(TABLES.chat_members, hasStatusNow
         ? { chat_id: chat.id, status: 'approved' }
         : { chat_id: chat.id }
       );
@@ -1189,7 +1189,6 @@ async function leaveMeetingChatFromPanel(chat, meeting) {
       remainingMembers = [];
     }
 
-    // If no members remain, delete the chat (and meeting if owner left)
     if (remainingMembers.length === 0) {
       try {
         await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id });
@@ -1198,29 +1197,23 @@ async function leaveMeetingChatFromPanel(chat, meeting) {
         if (meeting.id) {
           try {
             await api.delete(TABLES.meetings, meeting.id);
-          } catch (_e) {
-            // ignore meeting deletion errors
-          }
+          } catch (_e) {}
         }
-      } catch (_e) {
-        // Ignore delete errors
-      }
+      } catch (_e) {}
       if (meeting.id) {
-        notifyUser('Встреча удалена');
+        notifyUser('������� �������');
       }
     }
 
-    // Refresh chat list and close the current chat view
     currentChat = null;
-    renderEmptyChat('Выберите чат слева');
+    renderEmptyChat('�������� ��� �����');
     await loadChats(true);
     toggleInfoPanel(false);
   } catch (e) {
-    console.error('Ошибка выхода из чата:', e);
-    alert('Не удалось покинуть чат');
+    console.error('������ ������ �� ����:', e);
+    alert('�� ������� �������� ���');
   }
 }
-
 async function renderDirectInfo(chat, contentEl) {
   let peer = chat.__peerProfile || null;
   let peerId = chat.peer_id || null;
@@ -1295,3 +1288,5 @@ function escapeHtml(value) {
     .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
+
+

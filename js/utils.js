@@ -1,4 +1,4 @@
-async function fetchTopics() {
+﻿async function fetchTopics() {
   const { TABLES } = window.APP || {};
   try {
     return await api.get(TABLES.topics, { $order: { column: 'name', ascending: true } });
@@ -120,3 +120,4 @@ window.createUserNotification = createUserNotification;
 window.postChatSystemMessage = postChatSystemMessage;
 window.formatMeetingCountdown = formatMeetingCountdown;
 window.buildMeetingCountdownLabel = buildMeetingCountdownLabel;
+
