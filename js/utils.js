@@ -18,42 +18,23 @@ async function getCurrentUser() {
 }
 
 async function cleanupExpiredMeetings() {
-  const { TABLES } = window.APP || {};
   try {
-    const expiredMeetings = await api.get(TABLES.meetings, { expires_at: { lt: new Date().toISOString() } });
-    if (!expiredMeetings || expiredMeetings.length === 0) return;
-    for (const meeting of expiredMeetings) {
-      if (meeting && meeting.id) {
-        await deleteExpiredMeeting(meeting.id);
-      }
-    }
+    await api.request('/api/maintenance/cleanup-expired-meetings', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
   } catch (error) {
     console.error('Error cleaning expired meetings:', error);
   }
 }
 
 async function deleteExpiredMeeting(meetingId) {
-  const { TABLES } = window.APP || {};
   if (!meetingId) return;
 
   try {
-    const chats = await api.get(TABLES.chats, { meeting_id: meetingId });
-    const chat = (chats || [])[0];
-
-    if (chat && chat.id) {
-      try {
-        await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id });
-      } catch (_e) {}
-      try {
-        await api.query(TABLES.chat_messages, 'deleteWhere', {}, { chat_id: chat.id });
-      } catch (_e) {}
-      try {
-        await api.delete(TABLES.chats, chat.id);
-      } catch (_e) {}
-    }
-
-    await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });
-    await api.delete(TABLES.meetings, meetingId);
+    await api.request(`/api/meetings/${encodeURIComponent(meetingId)}/cascade`, {
+      method: 'DELETE'
+    });
   } catch (error) {
     console.error('Error deleting expired meeting:', meetingId, error);
   }

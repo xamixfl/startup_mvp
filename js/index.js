@@ -43,7 +43,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   TOPICS = await window.fetchTopics();
   populateTopicDropdown();
   await initApp();
-  await window.cleanupExpiredMeetings();
   await loadMeetings();
   setupEventListeners();
   setupGlobalSearch();

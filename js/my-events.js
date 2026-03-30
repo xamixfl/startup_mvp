@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   TOPICS = await window.fetchTopics();
-  await window.cleanupExpiredMeetings();
   await loadMeetings();
   await loadParticipationNotifications();
   setupTabs();

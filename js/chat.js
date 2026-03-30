@@ -157,10 +157,6 @@ async function initChatPage() {
       TOPICS = await window.fetchTopics();
     }
 
-    if (typeof window.cleanupExpiredMeetings === 'function') {
-      await window.cleanupExpiredMeetings();
-    }
-
     setupChatSelectionFromUrl();
     startRealtimeStream();
     await loadChats();

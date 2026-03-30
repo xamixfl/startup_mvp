@@ -33,6 +33,7 @@ const typingState = new Map();
 const TYPING_TTL_MS = 3500;
 const schemaColumnCache = new Map();
 const eventClients = new Map();
+const EXPIRED_MEETINGS_CLEANUP_INTERVAL_MS = 60 * 1000;
 
 async function tableHasColumn(tableName, columnName) {
   const cacheKey = `${tableName}:${columnName}`;
@@ -146,6 +147,47 @@ async function ensureChatAccess(chatId, userId) {
   return result.rowCount > 0;
 }
 
+async function deleteMeetingCascade(meetingId) {
+  if (!meetingId) return;
+
+  const chats = await selectRows('chats', { meeting_id: meetingId });
+  const chat = (chats || [])[0];
+
+  if (chat?.id) {
+    try {
+      await deleteWhere('chat_members', { chat_id: chat.id });
+    } catch (_e) {}
+    try {
+      await deleteWhere('chat_messages', { chat_id: chat.id });
+    } catch (_e) {}
+    try {
+      await deleteRow('chats', { id: chat.id });
+    } catch (_e) {}
+  }
+
+  try {
+    await deleteWhere('table-connector', { meeting_id: meetingId });
+  } catch (_e) {}
+
+  try {
+    await deleteRow('meetings', { id: meetingId });
+  } catch (_e) {}
+}
+
+async function cleanupExpiredMeetingsServer() {
+  const nowIso = new Date().toISOString();
+  const expiredMeetings = await selectRows('meetings', { expires_at: { lt: nowIso } });
+  let deleted = 0;
+
+  for (const meeting of expiredMeetings || []) {
+    if (!meeting?.id) continue;
+    await deleteMeetingCascade(meeting.id);
+    deleted += 1;
+  }
+
+  return { deleted };
+}
+
 function normalizeProfilesRows(rows) {
   if (!Array.isArray(rows)) return rows;
   return rows.map(row => {
@@ -214,6 +256,15 @@ app.get('/api/debug/topics', async (_req, res) => {
   }
 });
 
+app.post('/api/maintenance/cleanup-expired-meetings', async (_req, res) => {
+  try {
+    const result = await cleanupExpiredMeetingsServer();
+    return res.json({ ok: true, ...result });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message || 'Cleanup failed' });
+  }
+});
+
 app.post('/api/query', async (req, res) => {
   try {
     const { table, action, data, filters } = req.body || {};
@@ -259,6 +310,28 @@ app.get('/api/meetings', async (_req, res) => {
     return res.json(rows);
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed' });
+  }
+});
+
+app.delete('/api/meetings/:meetingId/cascade', requireAuth, async (req, res) => {
+  try {
+    const meetingId = String(req.params.meetingId || '');
+    if (!meetingId) return res.status(400).json({ error: 'Missing meetingId' });
+
+    const meetingRows = await selectRows('meetings', { id: meetingId });
+    const meeting = (meetingRows || [])[0];
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    const isOwner = String(meeting.creator_id || '') === String(req.user.id || '');
+    const isAdmin = req.user?.role === 'admin';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await deleteMeetingCascade(meetingId);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to delete meeting' });
   }
 });
 
@@ -652,3 +725,19 @@ app.use('/api', (err, _req, res, _next) => {
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`);
 });
+
+cleanupExpiredMeetingsServer()
+  .then((result) => {
+    if (result.deleted > 0) {
+      console.log(`Expired meetings cleanup: deleted ${result.deleted}`);
+    }
+  })
+  .catch((error) => {
+    console.error('Expired meetings cleanup failed on startup:', error.message || error);
+  });
+
+setInterval(() => {
+  cleanupExpiredMeetingsServer().catch((error) => {
+    console.error('Expired meetings cleanup failed:', error.message || error);
+  });
+}, EXPIRED_MEETINGS_CLEANUP_INTERVAL_MS);
