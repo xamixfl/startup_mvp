@@ -73,6 +73,29 @@ async function getTableColumns(tableName) {
   return columns;
 }
 
+async function buildProfileJsonObjectSql(alias) {
+  const profileColumns = await getTableColumns('profiles');
+  const fields = [
+    'id',
+    'username',
+    'full_name',
+    'email',
+    'age',
+    'location',
+    'city',
+    'about',
+    'bio',
+    'description',
+    'photo_url'
+  ].filter(column => profileColumns.has(column));
+
+  if (fields.length === 0) {
+    return 'NULL::jsonb';
+  }
+
+  return `jsonb_build_object(${fields.map(column => `'${column}', ${alias}."${column}"`).join(', ')})`;
+}
+
 function addEventClient(userId, res) {
   const key = String(userId);
   if (!eventClients.has(key)) {
@@ -542,12 +565,25 @@ app.post('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const rows = await insertRow('chat_messages', {
+    const insertedRows = await insertRow('chat_messages', {
       chat_id: chatId,
       user_id: actorId || req.user.id,
       content
     });
-    const message = rows[0] || null;
+    const inserted = insertedRows[0] || null;
+    let message = inserted;
+    if (inserted?.id) {
+      const senderJsonSql = await buildProfileJsonObjectSql('p');
+      const messageResult = await query(
+        `SELECT m.*, ${senderJsonSql} AS sender_profile
+           FROM chat_messages m
+           LEFT JOIN profiles p ON p.id = m.user_id
+          WHERE m.id = $1
+          LIMIT 1`,
+        [inserted.id]
+      );
+      message = (messageResult.rows || [])[0] || inserted;
+    }
     if (message) {
       await broadcastToChat(chatId, 'chat_message', {
         chat_id: chatId,
@@ -557,6 +593,60 @@ app.post('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
     return res.json(message);
   } catch (e) {
     return res.status(400).json({ error: e.message || 'Failed to send message' });
+  }
+});
+
+app.get('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
+  try {
+    const chatId = String(req.params.chatId || '');
+    const before = String(req.query.before || '').trim();
+    const after = String(req.query.after || '').trim();
+    const limitRaw = Number(req.query.limit || 50);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.floor(limitRaw), 1), 100) : 50;
+
+    if (!chatId) {
+      return res.status(400).json({ error: 'Missing chatId' });
+    }
+
+    const allowed = await ensureChatAccess(chatId, req.user.id);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const params = [chatId];
+    const conditions = ['chat_id = $1'];
+
+    if (before) {
+      params.push(before);
+      conditions.push(`created_at < $${params.length}`);
+    }
+    if (after) {
+      params.push(after);
+      conditions.push(`created_at > $${params.length}`);
+    }
+
+    params.push(limit + 1);
+    const senderJsonSql = await buildProfileJsonObjectSql('p');
+    const sql = `
+      SELECT m.*, ${senderJsonSql} AS sender_profile
+        FROM chat_messages m
+        LEFT JOIN profiles p ON p.id = m.user_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY m.created_at DESC, m.id DESC
+       LIMIT $${params.length}
+    `;
+    const result = await query(sql, params);
+    const rows = result.rows || [];
+    const hasMore = rows.length > limit;
+    const sliced = hasMore ? rows.slice(0, limit) : rows;
+    const messages = sliced.reverse();
+
+    return res.json({
+      messages,
+      has_more: hasMore
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Failed to load messages' });
   }
 });
 

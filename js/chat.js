@@ -23,9 +23,14 @@ let chatListRefreshTimer = null;
 let currentChatMessageSignature = 'empty';
 let pendingImageFile = null;
 const MAX_IMAGE_MB = 5;
+const MESSAGE_PAGE_SIZE = 50;
 let currentChatLastCreatedAt = null;
 let openedChatReadAt = {};
 const renderedMessageKeysByChat = new Map();
+const loadedMessagesByChat = new Map();
+const hasOlderMessagesByChat = new Map();
+const loadingOlderMessagesByChat = new Map();
+const profileCache = new Map();
 
 function isModerationChat(chat) {
   return Boolean(chat && !chat.meeting_id && LEGACY_ADMIN_CHAT_TITLES.has(String(chat.title || '').trim()));
@@ -135,6 +140,7 @@ async function initChatPage() {
     currentUser = typeof window.getCurrentUser === 'function'
       ? await window.getCurrentUser()
       : await api.request('/api/auth/me');
+    primeProfileCache(currentUser);
 
     if (!currentUser) {
       window.location.href = 'login.html';
@@ -165,6 +171,7 @@ async function initChatPage() {
     setupTypingIndicator();
     setupImageModal();
     setupTitleToggle();
+    setupChatBodyPagination();
 
     startChatListPolling();
   } catch (error) {
@@ -407,6 +414,17 @@ function scheduleChatListRefresh() {
     chatListRefreshTimer = null;
     await loadChats(true);
   }, 400);
+}
+
+function setupChatBodyPagination() {
+  const body = document.getElementById('chat-body');
+  if (!body || body.dataset.paginationBound === 'true') return;
+  body.dataset.paginationBound = 'true';
+  body.addEventListener('scroll', () => {
+    if (!currentChat?.id) return;
+    if (body.scrollTop > 80) return;
+    loadOlderMessages(currentChat.id).catch(() => {});
+  });
 }
 
 async function removeChatCompletely(chatId) {
@@ -681,44 +699,81 @@ function getMsgCreatedAt(msg) {
   return msg?.created_at || msg?.createdAt || msg?.timestamp || null;
 }
 
+function normalizeMessageProfile(profile) {
+  if (!profile || typeof profile !== 'object') return null;
+  const normalized = { ...profile };
+  if (normalized.photo_url && !normalized.photo_URL) {
+    normalized.photo_URL = normalized.photo_url;
+  }
+  if (normalized.city && !normalized.location) {
+    normalized.location = normalized.city;
+  }
+  if (!normalized.about) {
+    if (normalized.bio) normalized.about = normalized.bio;
+    else if (normalized.description) normalized.about = normalized.description;
+  }
+  return normalized;
+}
+
+function primeProfileCache(profile) {
+  const normalized = normalizeMessageProfile(profile);
+  if (!normalized?.id) return normalized;
+  profileCache.set(normalized.id, normalized);
+  return normalized;
+}
+
+function getMessageProfile(msg, fallbackProfile = null) {
+  const direct = primeProfileCache(msg?.sender_profile || msg?.__profile || fallbackProfile);
+  if (direct) return direct;
+  return msg?.user_id ? (profileCache.get(msg.user_id) || null) : null;
+}
+
 function isAtBottom(bodyEl) {
   if (!bodyEl) return true;
   return (bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight) < 60;
 }
 
-async function loadInitialMessages(chatId) {
+async function fetchChatMessagesPage(chatId, options = {}) {
+  const params = new URLSearchParams();
+  params.set('limit', String(options.limit || MESSAGE_PAGE_SIZE));
+  if (options.before) params.set('before', options.before);
+  if (options.after) params.set('after', options.after);
+  const queryString = params.toString();
+  return api.request(`/api/chats/${encodeURIComponent(chatId)}/messages${queryString ? `?${queryString}` : ''}`, {
+    method: 'GET'
+  });
+}
+
+function renderMessagesFromStore(chatId, options = {}) {
   const body = document.getElementById('chat-body');
-  if (!body) return null;
+  if (!body) return;
+  const messages = loadedMessagesByChat.get(chatId) || [];
 
-  try {
-    let messages = [];
+  body.innerHTML = '';
+  getRenderedKeySet(chatId).clear();
+
+  if (hasOlderMessagesByChat.get(chatId)) {
+    const marker = document.createElement('div');
+    marker.className = 'message-history-marker';
+    marker.textContent = loadingOlderMessagesByChat.get(chatId)
+      ? 'Загрузка более ранних сообщений...'
+      : 'Прокрутите вверх, чтобы загрузить более ранние сообщения';
+    body.appendChild(marker);
+  }
+
+  const userIds = Array.from(new Set(messages.map(m => m.user_id).filter(Boolean)));
+  return (async () => {
+    let profiles = [];
+    const missingIds = userIds.filter(id => !profileCache.has(id));
     try {
-      messages = await api.get(TABLES.chat_messages, {
-        chat_id: chatId,
-        $order: { column: 'created_at', ascending: true },
-        $limit: 200
-      });
+      profiles = missingIds.length ? await api.get(TABLES.profiles, { id: { in: missingIds } }) : [];
     } catch (_e) {
-      // Fallback when server-side ordering isn't available.
-      messages = await api.get(TABLES.chat_messages, { chat_id: chatId, $limit: 200 });
-      messages = (messages || []).sort((a, b) => {
-        const ta = new Date(getMsgCreatedAt(a) || 0).getTime();
-        const tb = new Date(getMsgCreatedAt(b) || 0).getTime();
-        return ta - tb;
-      });
+      profiles = [];
     }
-
-    const signature = computeMessageSignature(messages);
-    currentChatMessageSignature = signature;
-    body.innerHTML = '';
-    getRenderedKeySet(chatId).clear();
-
-    const userIds = Array.from(new Set((messages || []).map(m => m.user_id).filter(Boolean)));
-    const profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
-    const byId = new Map((profiles || []).map(p => [p.id, p]));
+    (profiles || []).forEach(primeProfileCache);
 
     let previousMessageDateKey = null;
-    (messages || []).forEach(msg => {
+    messages.forEach(msg => {
       const messageDateKey = getMessageDateKey(msg.created_at);
       if (messageDateKey && messageDateKey !== previousMessageDateKey) {
         body.appendChild(renderDateSeparator(msg.created_at));
@@ -728,11 +783,32 @@ async function loadInitialMessages(chatId) {
       const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
       getRenderedKeySet(chatId).add(key);
       const mine = msg.user_id === currentUser.id;
-      const p = byId.get(msg.user_id);
+      const p = getMessageProfile(msg, mine ? currentUser : null);
       body.appendChild(renderMessage(msg, p, mine));
     });
 
-    body.scrollTop = body.scrollHeight;
+    if (options.preserveOffset) {
+      const nextHeight = body.scrollHeight;
+      body.scrollTop = Math.max(nextHeight - options.preserveOffset, 0);
+    } else if (options.scrollToBottom) {
+      body.scrollTop = body.scrollHeight;
+    }
+  })();
+}
+
+async function loadInitialMessages(chatId) {
+  const body = document.getElementById('chat-body');
+  if (!body) return null;
+
+  try {
+    const page = await fetchChatMessagesPage(chatId, { limit: MESSAGE_PAGE_SIZE });
+    const messages = Array.isArray(page?.messages) ? page.messages : [];
+    loadedMessagesByChat.set(chatId, messages);
+    hasOlderMessagesByChat.set(chatId, Boolean(page?.has_more));
+
+    const signature = computeMessageSignature(messages);
+    currentChatMessageSignature = signature;
+    await renderMessagesFromStore(chatId, { scrollToBottom: true });
 
     const lastCreatedAt = (messages && messages.length) ? getMsgCreatedAt(messages[messages.length - 1]) : null;
     return { signature, lastCreatedAt };
@@ -775,21 +851,7 @@ async function pollNewMessages(chatId) {
     fresh.push(msg);
   }
   if (fresh.length === 0) return;
-
-  const userIds = Array.from(new Set(fresh.map(m => m.user_id).filter(Boolean)));
-  let profiles = [];
-  try {
-    profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
-  } catch (_e) {
-    profiles = [];
-  }
-  const byId = new Map((profiles || []).map(p => [p.id, p]));
-
-  fresh.forEach(msg => {
-    const mine = msg.user_id === currentUser.id;
-    const p = byId.get(msg.user_id);
-    body.appendChild(renderMessage(msg, p, mine));
-  });
+  await appendMessagesToChat(chatId, fresh);
 
   const last = fresh[fresh.length - 1];
   const lastAt = getMsgCreatedAt(last);
@@ -812,24 +874,36 @@ async function appendMessagesToChat(chatId, fresh, options = {}) {
   if (!body || !Array.isArray(fresh) || fresh.length === 0) return;
 
   const wasAtBottom = options.forceScroll ? true : isAtBottom(body);
-  const userIds = Array.from(new Set(fresh.map(m => m.user_id).filter(Boolean)));
+  const existing = loadedMessagesByChat.get(chatId) || [];
+  const knownKeys = new Set(existing.map(msg => msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`));
+  const uniqueFresh = fresh.filter(msg => {
+    const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
+    if (knownKeys.has(key)) return false;
+    knownKeys.add(key);
+    return true;
+  });
+  if (uniqueFresh.length === 0) return;
+
+  loadedMessagesByChat.set(chatId, existing.concat(uniqueFresh));
+  const userIds = Array.from(new Set(uniqueFresh.map(m => m.user_id).filter(Boolean)));
   let profiles = [];
+  const missingIds = userIds.filter(id => !profileCache.has(id) && !uniqueFresh.some(msg => msg.user_id === id && (msg.sender_profile || msg.__profile)));
   try {
-    profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
+    profiles = missingIds.length ? await api.get(TABLES.profiles, { id: { in: missingIds } }) : [];
   } catch (_e) {
     profiles = [];
   }
-  const byId = new Map((profiles || []).map(p => [p.id, p]));
+  (profiles || []).forEach(primeProfileCache);
 
-  fresh.forEach(msg => {
+  uniqueFresh.forEach(msg => {
     const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
     getRenderedKeySet(chatId).add(key);
     const mine = msg.user_id === currentUser.id;
-    const p = byId.get(msg.user_id) || (mine ? currentUser : null);
+    const p = getMessageProfile(msg, mine ? currentUser : null);
     body.appendChild(renderMessage(msg, p, mine));
   });
 
-  const last = fresh[fresh.length - 1];
+  const last = uniqueFresh[uniqueFresh.length - 1];
   const lastAt = getMsgCreatedAt(last);
   if (lastAt) {
     currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, lastAt);
@@ -842,6 +916,36 @@ async function appendMessagesToChat(chatId, fresh, options = {}) {
 
   if (wasAtBottom) {
     body.scrollTop = body.scrollHeight;
+  }
+}
+
+async function loadOlderMessages(chatId) {
+  if (!chatId || loadingOlderMessagesByChat.get(chatId) || !hasOlderMessagesByChat.get(chatId)) return;
+  const currentMessages = loadedMessagesByChat.get(chatId) || [];
+  const oldest = currentMessages.length > 0 ? getMsgCreatedAt(currentMessages[0]) : null;
+  if (!oldest) return;
+
+  loadingOlderMessagesByChat.set(chatId, true);
+  const body = document.getElementById('chat-body');
+  const preserveOffset = body ? (body.scrollHeight - body.scrollTop) : null;
+
+  try {
+    const page = await fetchChatMessagesPage(chatId, {
+      limit: MESSAGE_PAGE_SIZE,
+      before: oldest
+    });
+    const olderMessages = Array.isArray(page?.messages) ? page.messages : [];
+    if (olderMessages.length > 0) {
+      loadedMessagesByChat.set(chatId, olderMessages.concat(currentMessages));
+    }
+    hasOlderMessagesByChat.set(chatId, Boolean(page?.has_more));
+    await renderMessagesFromStore(chatId, {
+      preserveOffset
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки старых сообщений:', error);
+  } finally {
+    loadingOlderMessagesByChat.set(chatId, false);
   }
 }
 
