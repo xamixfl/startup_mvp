@@ -7,6 +7,7 @@ let TOPICS = [];
 let currentFilter = 'all';
 let participationNotifications = [];
 let notificationsPollTimer = null;
+let notificationsPanelOpen = false;
 
 const PARTICIPATION_NOTIFICATION_TYPES = new Set([
   'event_join_request',
@@ -147,7 +148,31 @@ function setupTabs() {
 }
 
 function setupNotificationActions() {
+  const toggleBtn = document.getElementById('notifications-toggle');
+  const panel = document.getElementById('notifications-panel');
   const markAllBtn = document.getElementById('notifications-mark-all');
+  if (toggleBtn && panel) {
+    toggleBtn.onclick = (event) => {
+      event.stopPropagation();
+      setNotificationsPanelOpen(!notificationsPanelOpen);
+    };
+
+    panel.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+
+    document.addEventListener('click', () => {
+      if (!notificationsPanelOpen) return;
+      setNotificationsPanelOpen(false);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && notificationsPanelOpen) {
+        setNotificationsPanelOpen(false);
+      }
+    });
+  }
+
   if (!markAllBtn) return;
 
   markAllBtn.onclick = async () => {
@@ -157,6 +182,16 @@ function setupNotificationActions() {
     await Promise.all(unread.map(item => markNotificationRead(item.id)));
     await loadParticipationNotifications();
   };
+}
+
+function setNotificationsPanelOpen(isOpen) {
+  const toggleBtn = document.getElementById('notifications-toggle');
+  const panel = document.getElementById('notifications-panel');
+  if (!toggleBtn || !panel) return;
+
+  notificationsPanelOpen = Boolean(isOpen);
+  panel.hidden = !notificationsPanelOpen;
+  toggleBtn.setAttribute('aria-expanded', notificationsPanelOpen ? 'true' : 'false');
 }
 
 function startNotificationsPolling() {
@@ -176,7 +211,8 @@ async function loadParticipationNotifications(silent = false) {
       $order: { column: 'created_at', ascending: false },
       $limit: 20
     });
-    participationNotifications = (rows || []).filter(item => PARTICIPATION_NOTIFICATION_TYPES.has(item.notification_type));
+    const filtered = (rows || []).filter(item => PARTICIPATION_NOTIFICATION_TYPES.has(item.notification_type));
+    participationNotifications = await enrichParticipationNotifications(filtered);
     renderParticipationNotifications();
   } catch (error) {
     console.error('Ошибка загрузки уведомлений:', error);
@@ -184,13 +220,86 @@ async function loadParticipationNotifications(silent = false) {
   }
 }
 
+async function enrichParticipationNotifications(notifications) {
+  if (!Array.isArray(notifications) || notifications.length === 0) return [];
+
+  const meetingIds = Array.from(new Set(
+    notifications
+      .filter(item => item.related_table === 'meetings' && item.related_id)
+      .map(item => item.related_id)
+  ));
+
+  const meetings = meetingIds.length > 0
+    ? await api.get(TABLES.meetings, { id: { in: meetingIds } })
+    : [];
+  const meetingsById = new Map((meetings || []).map(meeting => [meeting.id, meeting]));
+
+  const requestMeetings = notifications
+    .filter(item => item.notification_type === 'event_join_request')
+    .map(item => meetingsById.get(item.related_id))
+    .filter(meeting => meeting?.id && meeting?.chat_id);
+
+  const requestMeetingIds = new Set(requestMeetings.map(meeting => meeting.id));
+  const requestChatIds = Array.from(new Set(requestMeetings.map(meeting => meeting.chat_id)));
+  let pendingByMeetingId = new Map();
+
+  if (requestChatIds.length > 0) {
+    const pendingRows = await api.get(TABLES.chat_members, {
+      chat_id: { in: requestChatIds },
+      status: 'pending'
+    });
+    const profileIds = Array.from(new Set((pendingRows || []).map(row => row.user_id).filter(Boolean)));
+    const profiles = profileIds.length > 0
+      ? await api.get(TABLES.profiles, { id: { in: profileIds } })
+      : [];
+    const profilesById = new Map((profiles || []).map(profile => [profile.id, profile]));
+    const meetingIdByChatId = new Map(requestMeetings.map(meeting => [meeting.chat_id, meeting.id]));
+
+    pendingByMeetingId = new Map(Array.from(requestMeetingIds).map(meetingId => [meetingId, []]));
+    (pendingRows || []).forEach(row => {
+      const meetingId = meetingIdByChatId.get(row.chat_id);
+      if (!meetingId) return;
+      const profile = profilesById.get(row.user_id);
+      const pending = pendingByMeetingId.get(meetingId) || [];
+      pending.push({
+        membershipId: row.id,
+        userId: row.user_id,
+        createdAt: row.created_at || null,
+        profile,
+        displayName: getProfileDisplayName(profile, row.user_id)
+      });
+      pendingByMeetingId.set(meetingId, pending);
+    });
+  }
+
+  return notifications.map(notification => {
+    const meeting = meetingsById.get(notification.related_id) || null;
+    const pendingRequests = meeting?.id ? (pendingByMeetingId.get(meeting.id) || []) : [];
+    const resolvedRequest = notification.notification_type === 'event_join_request'
+      ? resolveNotificationRequest(notification, pendingRequests)
+      : null;
+
+    return {
+      ...notification,
+      meeting,
+      pendingRequests,
+      resolvedRequest
+    };
+  });
+}
+
 function renderParticipationNotifications() {
   const list = document.getElementById('notifications-list');
   const markAllBtn = document.getElementById('notifications-mark-all');
+  const toggleBadge = document.getElementById('notifications-toggle-badge');
   if (!list || !markAllBtn) return;
 
-  const unreadCount = participationNotifications.filter(item => !item.is_read).length;
+  const unreadCount = participationNotifications.filter(item => item.is_read !== true).length;
   markAllBtn.disabled = unreadCount === 0;
+  if (toggleBadge) {
+    toggleBadge.style.display = unreadCount > 0 ? 'inline-flex' : 'none';
+    toggleBadge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+  }
 
   if (participationNotifications.length === 0) {
     list.innerHTML = '<div class="notifications-empty">Пока нет уведомлений по участию во встречах.</div>';
@@ -200,34 +309,50 @@ function renderParticipationNotifications() {
   list.innerHTML = '';
   participationNotifications.forEach(notification => {
     const item = document.createElement('div');
-    item.className = `notification-item${notification.is_read ? '' : ' unread'}`;
+    item.className = `notification-item${notification.is_read === true ? '' : ' unread'}`;
+    const meetingTitle = getNotificationMeetingTitle(notification);
+    const bodyText = getNotificationBodyText(notification);
+    const canModerateRequest = Boolean(
+      notification.notification_type === 'event_join_request' &&
+      notification.meeting?.creator_id === currentUser?.id &&
+      notification.meeting?.chat_id &&
+      notification.resolvedRequest?.userId
+    );
     item.innerHTML = `
       <div class="notification-main">
         <div class="notification-meta">
           <span class="notification-pill">${escapeHtml(getNotificationTypeLabel(notification.notification_type))}</span>
           <span class="notification-time">${escapeHtml(formatNotificationTime(notification.created_at))}</span>
         </div>
-        <div class="notification-heading">${escapeHtml(notification.title || 'Обновление по встрече')}</div>
-        <div class="notification-message">${escapeHtml(notification.message || '')}</div>
+        <button type="button" class="notification-title-link">${escapeHtml(meetingTitle)}</button>
+        <div class="notification-message">${escapeHtml(bodyText)}</div>
       </div>
       <div class="notification-actions">
-        <button type="button" class="notification-open-btn">Открыть</button>
-        ${notification.is_read ? '' : '<button type="button" class="notification-read-btn">Прочитано</button>'}
+        ${canModerateRequest ? `
+          <button type="button" class="notification-approve-btn">Одобрить</button>
+          <button type="button" class="notification-reject-btn">Отклонить</button>
+        ` : ''}
       </div>
     `;
 
-    const openBtn = item.querySelector('.notification-open-btn');
-    if (openBtn) {
-      openBtn.onclick = async () => {
+    const titleLink = item.querySelector('.notification-title-link');
+    if (titleLink) {
+      titleLink.onclick = async () => {
         await handleNotificationOpen(notification);
       };
     }
 
-    const readBtn = item.querySelector('.notification-read-btn');
-    if (readBtn) {
-      readBtn.onclick = async () => {
-        await markNotificationRead(notification.id);
-        await loadParticipationNotifications(true);
+    const approveBtn = item.querySelector('.notification-approve-btn');
+    if (approveBtn) {
+      approveBtn.onclick = async () => {
+        await handleNotificationDecision(notification, 'approve', item);
+      };
+    }
+
+    const rejectBtn = item.querySelector('.notification-reject-btn');
+    if (rejectBtn) {
+      rejectBtn.onclick = async () => {
+        await handleNotificationDecision(notification, 'reject', item);
       };
     }
 
@@ -243,12 +368,36 @@ function renderNotificationsError() {
 
 async function handleNotificationOpen(notification) {
   if (!notification) return;
-  if (!notification.is_read) await markNotificationRead(notification.id);
+  if (notification.is_read !== true) await markNotificationRead(notification.id);
   if (notification.related_table === 'meetings' && notification.related_id) {
     window.location.href = `meeting.html?id=${notification.related_id}`;
     return;
   }
   await loadParticipationNotifications(true);
+}
+
+async function handleNotificationDecision(notification, action, item) {
+  if (!notification?.meeting?.id || !notification?.resolvedRequest?.userId) return;
+
+  const buttons = Array.from(item?.querySelectorAll('button') || []);
+  buttons.forEach(button => { button.disabled = true; });
+
+  try {
+    if (action === 'approve') {
+      await approveParticipationRequest(notification.meeting, notification.resolvedRequest.userId);
+    } else {
+      await rejectParticipationRequest(notification.meeting, notification.resolvedRequest.userId);
+    }
+
+    if (notification.is_read !== true) {
+      await markNotificationRead(notification.id);
+    }
+    await loadParticipationNotifications(true);
+  } catch (error) {
+    console.error('Ошибка обработки заявки из уведомления:', error);
+    alert(action === 'approve' ? 'Не удалось одобрить заявку' : 'Не удалось отклонить заявку');
+    buttons.forEach(button => { button.disabled = false; });
+  }
 }
 
 async function markNotificationRead(notificationId) {
@@ -262,6 +411,51 @@ async function markNotificationRead(notificationId) {
   } catch (error) {
     console.error('Ошибка отметки уведомления:', error);
     return null;
+  }
+}
+
+async function approveParticipationRequest(meeting, userId) {
+  const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: userId });
+  const membership = (rows || [])[0];
+  if (!membership?.id) throw new Error('Membership not found');
+
+  await api.update(TABLES.chat_members, membership.id, { status: 'approved' });
+  await ensureParticipantRecordSafe(meeting.id, userId);
+
+  const currentSlots = Number(meeting.current_slots || 0);
+  await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
+
+  if (userId && typeof window.createUserNotification === 'function') {
+    await window.createUserNotification(userId, {
+      notification_type: 'event_join_approved',
+      related_table: 'meetings',
+      related_id: meeting.id,
+      title: meeting.title || 'Встреча',
+      message: `Организатор добавил вас во встречу «${meeting.title || 'Встреча'}».`
+    });
+  }
+
+  if (meeting.chat_id) {
+    const senderName = await fetchNotificationUserName(userId);
+    await window.postChatSystemMessage?.(meeting.chat_id, `${senderName} присоединился к чату встречи`, userId);
+  }
+}
+
+async function rejectParticipationRequest(meeting, userId) {
+  const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: userId });
+  const membership = (rows || [])[0];
+  if (!membership?.id) throw new Error('Membership not found');
+
+  await api.update(TABLES.chat_members, membership.id, { status: 'rejected' });
+
+  if (userId && typeof window.createUserNotification === 'function') {
+    await window.createUserNotification(userId, {
+      notification_type: 'event_join_rejected',
+      related_table: 'meetings',
+      related_id: meeting.id,
+      title: meeting.title || 'Встреча',
+      message: `Организатор отклонил вашу заявку на встречу «${meeting.title || 'Встреча'}».`
+    });
   }
 }
 
@@ -299,6 +493,75 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function getProfileDisplayName(profile, fallback = 'Пользователь') {
+  return profile?.full_name || profile?.username || profile?.email || fallback;
+}
+
+function parseJoinRequesterName(message) {
+  const text = String(message || '');
+  const marker = ' хочет присоединиться';
+  const index = text.indexOf(marker);
+  if (index <= 0) return '';
+  return text.slice(0, index).trim();
+}
+
+function normalizeNotificationName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function resolveNotificationRequest(notification, pendingRequests) {
+  if (!Array.isArray(pendingRequests) || pendingRequests.length === 0) return null;
+  if (pendingRequests.length === 1) return pendingRequests[0];
+
+  const senderName = normalizeNotificationName(parseJoinRequesterName(notification.message));
+  if (!senderName) return null;
+
+  const matches = pendingRequests.filter(request => normalizeNotificationName(request.displayName) === senderName);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function getNotificationMeetingTitle(notification) {
+  return notification.meeting?.title || notification.title || 'Встреча';
+}
+
+function getNotificationBodyText(notification) {
+  if (notification.notification_type === 'event_join_request') {
+    const requesterName = notification.resolvedRequest?.displayName || parseJoinRequesterName(notification.message) || 'Пользователь';
+    if (notification.pendingRequests?.length > 1 && !notification.resolvedRequest) {
+      return `${requesterName}. Откройте встречу, если нужно выбрать заявку вручную.`;
+    }
+    return `${requesterName} хочет присоединиться к событию.`;
+  }
+
+  return notification.message || '';
+}
+
+async function fetchNotificationUserName(userId) {
+  if (!userId) return 'Пользователь';
+  try {
+    const rows = await api.get(TABLES.profiles, { id: userId, $limit: 1 });
+    return getProfileDisplayName((rows || [])[0], userId);
+  } catch (_error) {
+    return userId;
+  }
+}
+
+async function ensureParticipantRecordSafe(meetingId, userId) {
+  try {
+    const existing = await api.get(TABLES.participants, { meeting_id: meetingId, user_id: userId, $limit: 1 });
+    if (existing && existing[0]) return existing[0];
+  } catch (_error) {
+    // Fall through to insert attempt for older schemas.
+  }
+
+  try {
+    const rows = await api.insert(TABLES.participants, { meeting_id: meetingId, user_id: userId });
+    return Array.isArray(rows) ? rows[0] || null : null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 function renderMeetings(filter) {
@@ -340,7 +603,7 @@ function renderMeetings(filter) {
 function getTopicName(topicId) {
   if (!topicId) return 'Тема';
   const topic = (TOPICS || []).find(item => item.id === topicId);
-  if (topic?.name) return topic.name.replace(/^(\S+)\s/, '');
+  if (topic) return getTopicDisplayName(topic);
   return topicId;
 }
 
@@ -457,6 +720,18 @@ window.deleteMeeting = async function (meetingId) {
       return;
     }
 
+    if (meeting.chat_id) {
+      try {
+        await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id });
+      } catch (_e) {}
+      try {
+        await api.query(TABLES.chat_messages, 'deleteWhere', {}, { chat_id: meeting.chat_id });
+      } catch (_e) {}
+      try {
+        await api.delete(TABLES.chats, meeting.chat_id);
+      } catch (_e) {}
+    }
+
     // Keep legacy participants ("table-connector") clean.
     try {
       await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });
@@ -488,6 +763,11 @@ window.leaveMeeting = async function (meetingId) {
 
     const meeting = await api.getOne(TABLES.meetings, meetingId);
     if (meeting) {
+      if (meeting.chat_id) {
+        try {
+          await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: currentUser.id });
+        } catch (_e) {}
+      }
       await api.update(TABLES.meetings, meetingId, { current_slots: Math.max(0, (meeting.current_slots || 1) - 1) });
     }
 

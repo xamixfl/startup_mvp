@@ -145,7 +145,9 @@ function renderProfile(profile) {
       const topic = TOPICS.find(item => item.id === topicId);
       const pill = document.createElement('div');
       pill.className = 'interest-pill';
-      pill.textContent = topic ? topic.name : normalizeInterestLabel(topicId);
+      pill.textContent = topic
+        ? getTopicDisplayName(topic)
+        : normalizeInterestLabel(topicId);
       interestsWrap.appendChild(pill);
     });
   }
@@ -610,26 +612,48 @@ function renderEditInterests() {
   if (!container) return;
   container.innerHTML = '';
 
-  TOPICS.forEach(topic => {
-    const isChecked = (viewedProfile.interests || []).includes(topic.id);
-    const wrapper = document.createElement('div');
-    wrapper.className = 'interest-checkbox-wrapper';
+  const groups = typeof window.groupTopicsForDisplay === 'function'
+    ? window.groupTopicsForDisplay(TOPICS)
+    : [{ title: 'Интересы', items: TOPICS }];
 
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.className = 'interest-checkbox-input';
-    input.id = `interest-${topic.id}`;
-    input.value = topic.id;
-    input.checked = isChecked;
+  groups.forEach(group => {
+    const groupEl = document.createElement('section');
+    groupEl.className = 'interest-group';
 
-    const label = document.createElement('label');
-    label.className = 'interest-checkbox-label';
-    label.htmlFor = input.id;
-    label.textContent = topic.name;
+    const title = document.createElement('div');
+    title.className = 'interest-group-title';
+    title.textContent = group.title;
+    groupEl.appendChild(title);
 
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    container.appendChild(wrapper);
+    const itemsWrap = document.createElement('div');
+    itemsWrap.className = 'interest-group-items';
+
+    group.items.forEach(topic => {
+      const isChecked = (viewedProfile.interests || []).includes(topic.id);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'interest-checkbox-wrapper';
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.className = 'interest-checkbox-input';
+      input.id = `interest-${topic.id}`;
+      input.value = topic.id;
+      input.checked = isChecked;
+
+      const label = document.createElement('label');
+      label.className = 'interest-checkbox-label';
+      label.htmlFor = input.id;
+      label.textContent = typeof window.getTopicDisplayName === 'function'
+        ? window.getTopicDisplayName(topic)
+        : topic.name;
+
+      wrapper.appendChild(input);
+      wrapper.appendChild(label);
+      itemsWrap.appendChild(wrapper);
+    });
+
+    groupEl.appendChild(itemsWrap);
+    container.appendChild(groupEl);
   });
 
   container.onchange = () => updateEditSelectedInterests();
@@ -698,11 +722,18 @@ function filterEditInterestsList(query) {
 
   const normalized = String(query || '').trim().toLowerCase();
   let visible = 0;
-  container.querySelectorAll('.interest-checkbox-wrapper').forEach(item => {
-    const text = (item.textContent || '').toLowerCase();
-    const matches = !normalized || text.includes(normalized);
-    item.style.display = matches ? 'inline-flex' : 'none';
-    if (matches) visible += 1;
+  container.querySelectorAll('.interest-group').forEach(group => {
+    let groupVisible = 0;
+    group.querySelectorAll('.interest-checkbox-wrapper').forEach(item => {
+      const text = (item.textContent || '').toLowerCase();
+      const matches = !normalized || text.includes(normalized);
+      item.style.display = matches ? 'inline-flex' : 'none';
+      if (matches) {
+        visible += 1;
+        groupVisible += 1;
+      }
+    });
+    group.style.display = groupVisible > 0 ? '' : 'none';
   });
 
   if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
@@ -729,7 +760,9 @@ function updateEditSelectedInterests() {
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'edit-selected-interest-pill';
-    pill.textContent = topic?.name || id;
+    pill.textContent = topic
+      ? (typeof window.getTopicDisplayName === 'function' ? window.getTopicDisplayName(topic) : topic.name)
+      : id;
     pill.addEventListener('click', () => removeEditSelectedInterest(id));
     pills.appendChild(pill);
   });

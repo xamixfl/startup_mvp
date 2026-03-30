@@ -29,7 +29,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const meetingId = new URLSearchParams(window.location.search).get('id');
   const storedMeeting = meetingId ? getMeetingFromStorage(meetingId) : null;
-  const meeting = storedMeeting || (await fetchMeeting(meetingId));
+  const freshMeeting = await fetchMeeting(meetingId);
+  const meeting = freshMeeting || storedMeeting;
 
   if (!meeting) {
     showNotification('Встреча не найдена');
@@ -63,7 +64,7 @@ function getMeetingFromStorage(meetingId) {
 
 function renderMeeting(meeting, _user) {
   const topic = TOPICS.find(item => item.id === meeting.topic) || TOPICS[0];
-  const topicLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
+  const topicLabel = topic ? `#${getTopicDisplayName(topic)}` : '#Встреча';
 
   const tagEl = document.getElementById('meeting-tag');
   if (tagEl) {
@@ -294,7 +295,10 @@ async function setupChatState(meeting, user) {
         const row = document.createElement('div');
         row.className = 'request-item';
         row.innerHTML = `
-          <div><a href="profile.html?id=${req.user_id}">${name}${age}</a></div>
+          <div class="request-person">
+            <a href="profile.html?id=${req.user_id}">${name}${age}</a>
+            <div class="request-caption">Хочет присоединиться к этой встрече</div>
+          </div>
           <div class="request-actions">
             <button class="btn-approve">Одобрить</button>
             <button class="btn-reject">Отклонить</button>
@@ -499,7 +503,7 @@ async function requestJoin(meeting, user) {
           notification_type: 'event_join_request',
           related_table: 'meetings',
           related_id: meeting.id,
-          title: 'Новая заявка на участие',
+          title: meeting.title || 'Встреча',
           message: `${senderName} хочет присоединиться к встрече «${meeting.title || 'Встреча'}».`
         });
       }
@@ -651,7 +655,15 @@ function showNotification(message) {
   if (!notification) return;
   notification.textContent = message;
   notification.style.display = 'block';
-  setTimeout(() => { notification.style.display = 'none'; }, 3000);
+  requestAnimationFrame(() => {
+    notification.classList.add('is-visible');
+  });
+  setTimeout(() => {
+    notification.classList.remove('is-visible');
+    setTimeout(() => {
+      notification.style.display = 'none';
+    }, 240);
+  }, 3000);
 }
 
 let __chatMembersHasStatus = null;
@@ -742,6 +754,3 @@ async function ensureMeetingChat(meeting, user) {
     console.warn('ensureMeetingChat failed:', e);
   }
 }
-
-
-

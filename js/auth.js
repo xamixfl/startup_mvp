@@ -87,21 +87,45 @@ function initCategories() {
   const container = document.getElementById('categories-container');
   if (!container) return;
   container.innerHTML = '';
-  CATEGORIES.forEach(category => {
-    const checkboxId = `category-${category.id}`;
-    const wrapper = document.createElement('div');
+  const groups = typeof window.groupTopicsForDisplay === 'function'
+    ? window.groupTopicsForDisplay(CATEGORIES)
+    : [{ title: 'Категории', items: CATEGORIES }];
 
-    const { icon, displayName } = resolveCategoryLabel(category);
-    const iconHtml = icon ? `<span class="category-icon">${icon}</span>` : '';
+  groups.forEach(group => {
+    const groupEl = document.createElement('section');
+    groupEl.className = 'category-group';
 
-    wrapper.innerHTML = `
-      <input type="checkbox" id="${checkboxId}" class="category-checkbox" value="${category.id}">
-      <label for="${checkboxId}" class="category-label">
-        ${iconHtml}
-        <span>${displayName}</span>
-      </label>
-    `;
-    container.appendChild(wrapper);
+    const title = document.createElement('div');
+    title.className = 'category-group-title';
+    title.textContent = group.title;
+    groupEl.appendChild(title);
+
+    const itemsWrap = document.createElement('div');
+    itemsWrap.className = 'category-group-items';
+
+    group.items.forEach(category => {
+      const checkboxId = `category-${category.id}`;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'category-option';
+
+      const { icon } = resolveCategoryLabel(category);
+      const displayName = typeof window.getTopicDisplayName === 'function'
+        ? window.getTopicDisplayName(category)
+        : resolveCategoryLabel(category).displayName;
+      const iconHtml = icon ? `<span class="category-icon">${icon}</span>` : '';
+
+      wrapper.innerHTML = `
+        <input type="checkbox" id="${checkboxId}" class="category-checkbox" value="${category.id}">
+        <label for="${checkboxId}" class="category-label">
+          ${iconHtml}
+          <span>${displayName}</span>
+        </label>
+      `;
+      itemsWrap.appendChild(wrapper);
+    });
+
+    groupEl.appendChild(itemsWrap);
+    container.appendChild(groupEl);
   });
 
   container.addEventListener('change', updateSelectedCategoriesLabel);
@@ -162,11 +186,18 @@ function filterCategoriesList(query) {
   if (!container) return;
   const q = String(query || '').trim().toLowerCase();
   let visible = 0;
-  container.querySelectorAll('.category-label').forEach(label => {
-    const text = (label.textContent || '').toLowerCase();
-    const ok = !q || text.includes(q);
-    label.parentElement.style.display = ok ? '' : 'none';
-    if (ok) visible += 1;
+  container.querySelectorAll('.category-group').forEach(group => {
+    let groupVisible = 0;
+    group.querySelectorAll('.category-option').forEach(item => {
+      const text = (item.textContent || '').toLowerCase();
+      const ok = !q || text.includes(q);
+      item.style.display = ok ? '' : 'none';
+      if (ok) {
+        visible += 1;
+        groupVisible += 1;
+      }
+    });
+    group.style.display = groupVisible > 0 ? '' : 'none';
   });
   if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
 }
@@ -189,7 +220,9 @@ function updateSelectedCategoriesLabel() {
 
   selected.forEach(id => {
     const item = CATEGORIES.find(c => String(c.id) === String(id));
-    const name = item?.name ? item.name.replace(/^(\S+)\s+/, '') : id;
+    const name = item
+      ? (typeof window.getTopicDisplayName === 'function' ? window.getTopicDisplayName(item) : item.name.replace(/^(\S+)\s+/, ''))
+      : id;
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'selected-interest-pill';
@@ -501,4 +534,3 @@ function debounce(func, wait) {
     usernameCheckTimeout = setTimeout(later, wait);
   };
 }
-

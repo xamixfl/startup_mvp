@@ -104,10 +104,15 @@ async function populateTopicDropdown() {
   const select = document.getElementById('meeting-topic');
   if (!select || !window.fetchTopics) return;
   const topics = await window.fetchTopics();
-  (topics || []).forEach(topic => {
+  const selectableTopics = typeof window.getSelectableTopics === 'function'
+    ? window.getSelectableTopics(topics)
+    : (topics || []).filter(topic => !topic?.is_group);
+  selectableTopics.forEach(topic => {
     const option = document.createElement('option');
     option.value = topic.id;
-    option.textContent = topic.name;
+    option.textContent = typeof window.getTopicDisplayName === 'function'
+      ? window.getTopicDisplayName(topic)
+      : topic.name;
     select.appendChild(option);
   });
 }

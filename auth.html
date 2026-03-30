@@ -314,12 +314,12 @@
         }
 
         .categories-list {
-            max-height: 170px;
+            max-height: 360px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 4px;
-            padding-right: 2px;
+            gap: 16px;
+            padding-right: 4px;
         }
 
         .categories-empty {
@@ -363,35 +363,67 @@
             content: ' ×';
             font-weight: 700;
         }
+
+        .category-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .category-group-title {
+            font-size: 13px;
+            font-weight: 800;
+            color: #475569;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            padding: 0 4px;
+        }
+
+        .category-group-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .category-option {
+            display: inline-flex;
+        }
         
         .category-checkbox {
             display: none;
         }
         
         .category-label {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            padding: 8px 12px;
-            border: 2px solid #e2e8f0;
-            border-radius: 10px;
+            gap: 8px;
+            padding: 11px 16px;
+            border: 1px solid #dbe4f0;
+            border-radius: 14px;
             cursor: pointer;
             transition: all 0.2s;
-            font-size: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #334155;
+            background: #fff;
         }
         
         .category-label:hover {
             border-color: #3b82f6;
-            background: #f8fafc;
+            background: #f8fbff;
+            color: #1d4ed8;
+            transform: translateY(-1px);
         }
         
         .category-checkbox:checked + .category-label {
             border-color: #3b82f6;
-            background: #dbeafe;
+            background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+            color: #1d4ed8;
+            box-shadow: 0 10px 24px rgba(59, 130, 246, 0.12);
         }
         
         .category-icon {
-            margin-right: 8px;
-            font-size: 16px;
+            font-size: 18px;
         }
         
         /* Ошибки */
@@ -736,8 +768,7 @@
     <script src="js/api.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/beta-disclaimer.js"></script>
     <script src="js/auth.js"></script>
 </body>
 </html>
-
-

@@ -64,7 +64,6 @@
         .page-title {
             font-size: 32px;
             font-weight: 800;
-            margin-bottom: 10px;
         }
 
         .page-subtitle {
@@ -73,20 +72,93 @@
             margin-bottom: 30px;
         }
 
+        .notifications-toggle {
+            position: relative;
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-bottom: 3px solid transparent;
+            border-radius: 0;
+            background: none;
+            color: #64748b;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin-bottom: -2px;
+            transition: color 0.2s, border-color 0.2s;
+            padding: 0;
+        }
+
+        .notifications-toggle svg {
+            width: 22px;
+            height: 32px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            transform: scaleY(1.22);
+            transform-origin: center;
+            margin-top: -2px;
+        }
+
+        .notifications-toggle:hover,
+        .notifications-toggle[aria-expanded="true"] {
+            color: #3b82f6;
+            border-bottom-color: #3b82f6;
+        }
+
+        .notifications-toggle-badge {
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            min-width: 17px;
+            height: 17px;
+            padding: 0 4px;
+            border-radius: 999px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: #ef4444;
+            color: white;
+            font-size: 9px;
+            font-weight: 700;
+        }
+
         .tabs {
             display: flex;
-            gap: 15px;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 16px;
             margin-bottom: 30px;
             border-bottom: 2px solid #e2e8f0;
         }
 
+        .tabs-nav {
+            display: flex;
+            gap: 15px;
+            min-width: 0;
+        }
+
+        .tabs-actions {
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            flex-shrink: 0;
+        }
+
         .notifications-panel {
+            position: absolute;
+            top: calc(100% + 12px);
+            right: 0;
+            width: min(460px, calc(100vw - 40px));
             background: white;
             border: 1px solid #e2e8f0;
-            border-radius: 18px;
+            border-radius: 22px;
             padding: 20px 22px;
-            margin-bottom: 28px;
-            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+            z-index: 200;
         }
 
         .notifications-panel[hidden] {
@@ -159,6 +231,9 @@
             display: flex;
             flex-direction: column;
             gap: 12px;
+            max-height: min(60vh, 480px);
+            overflow-y: auto;
+            padding-right: 4px;
         }
 
         .notification-item {
@@ -226,40 +301,92 @@
 
         .notification-actions {
             display: flex;
-            align-items: center;
+            flex-direction: column;
+            align-items: stretch;
             gap: 8px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
+            justify-content: center;
+            min-width: 148px;
         }
 
-        .notification-open-btn,
-        .notification-read-btn {
+        .notification-title-link,
+        .notification-approve-btn,
+        .notification-reject-btn {
             border: none;
-            border-radius: 10px;
-            padding: 9px 12px;
+            border-radius: 14px;
+            padding: 11px 14px;
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
             font-family: 'Poppins', sans-serif;
         }
 
-        .notification-open-btn {
-            background: #3b82f6;
+        .notification-title-link {
+            padding: 0;
+            border-radius: 0;
+            background: transparent;
+            color: #0f172a;
+            font-size: 19px;
+            font-weight: 700;
+            text-align: left;
+            line-height: 1.35;
+        }
+
+        .notification-title-link:hover {
+            color: #2563eb;
+        }
+
+        .notification-approve-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
             color: white;
+            box-shadow: 0 12px 24px rgba(21, 128, 61, 0.22);
         }
 
-        .notification-open-btn:hover {
-            background: #2563eb;
+        .notification-approve-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 16px 30px rgba(21, 128, 61, 0.3);
         }
 
-        .notification-read-btn {
-            background: #e2e8f0;
-            color: #334155;
+        .notification-approve-btn::before {
+            content: "✓";
+            font-size: 14px;
+            font-weight: 800;
         }
 
-        .notification-read-btn:hover {
-            background: #cbd5e1;
+        .notification-reject-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: linear-gradient(180deg, #ffffff 0%, #fff1f2 100%);
+            color: #be123c;
+            border: 1px solid #fecdd3;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        }
+
+        .notification-reject-btn:hover {
+            transform: translateY(-1px);
+            background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+            border-color: #fda4af;
+        }
+
+        .notification-reject-btn::before {
+            content: "×";
+            font-size: 15px;
+            font-weight: 800;
+        }
+
+        .notification-approve-btn:disabled,
+        .notification-reject-btn:disabled,
+        .notification-title-link:disabled {
+            opacity: 0.6;
+            cursor: default;
+            transform: none;
+            box-shadow: none;
         }
 
         .notifications-empty {
@@ -540,6 +667,29 @@
             background: #fde68a;
             border-color: #fcd34d;
         }
+
+        @media (max-width: 720px) {
+            .tabs {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .tabs-nav {
+                width: 100%;
+                overflow-x: auto;
+                padding-bottom: 4px;
+            }
+
+            .tabs-actions {
+                align-self: flex-end;
+            }
+
+            .notifications-panel {
+                right: 0;
+                left: auto;
+                width: min(100vw - 40px, 420px);
+            }
+        }
     </style>
 </head>
 
@@ -556,25 +706,36 @@
         <p class="page-subtitle">Встречи, в которых вы участвуете</p>
 
         <div class="tabs">
-            <button class="tab active" data-tab="all">Все</button>
-            <button class="tab" data-tab="owner">Мои события</button>
-            <button class="tab" data-tab="participant">Участвую</button>
-        </div>
-
-        <section class="notifications-panel" id="notifications-panel">
-            <div class="notifications-header">
-                <div>
-                    <div class="notifications-title-row">
-                        <h2 class="notifications-title">Уведомления участия</h2>
-                    </div>
-                    <div class="notifications-subtitle">Здесь появляются заявки и решения по вашим встречам</div>
-                </div>
-                <div class="notifications-actions">
-                    <button type="button" class="notifications-action-btn" id="notifications-mark-all">Отметить всё прочитанным</button>
-                </div>
+            <div class="tabs-nav">
+                <button class="tab active" data-tab="all">Все</button>
+                <button class="tab" data-tab="owner">Мои события</button>
+                <button class="tab" data-tab="participant">Участвую</button>
             </div>
-            <div class="notifications-list" id="notifications-list"></div>
-        </section>
+            <div class="tabs-actions">
+                <button type="button" class="notifications-toggle" id="notifications-toggle" aria-expanded="false" aria-controls="notifications-panel" aria-label="Уведомления участия">
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M15 17h5l-1.4-1.4a2 2 0 0 1-.6-1.4V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5"></path>
+                        <path d="M10 17a2 2 0 0 0 4 0"></path>
+                    </svg>
+                    <span class="notifications-toggle-badge" id="notifications-toggle-badge"></span>
+                </button>
+
+                <section class="notifications-panel" id="notifications-panel" hidden>
+                    <div class="notifications-header">
+                        <div>
+                            <div class="notifications-title-row">
+                                <h2 class="notifications-title">Уведомления участия</h2>
+                            </div>
+                            <div class="notifications-subtitle">Здесь появляются заявки и решения по вашим встречам</div>
+                        </div>
+                        <div class="notifications-actions">
+                            <button type="button" class="notifications-action-btn" id="notifications-mark-all">Отметить всё прочитанным</button>
+                        </div>
+                    </div>
+                    <div class="notifications-list" id="notifications-list"></div>
+                </section>
+            </div>
+        </div>
 
         <div id="meetings-container" class="meetings-grid">
             <!-- Meetings will be loaded here -->
@@ -589,6 +750,7 @@
     <script src="js/api.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/beta-disclaimer.js"></script>
     <script src="js/reports-bans.js"></script>
     <script src="js/reporting.js"></script>
     <script src="js/my-events.js"></script>

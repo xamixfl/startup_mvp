@@ -595,6 +595,27 @@
             background: #2563eb;
         }
 
+        .interest-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .interest-group-title {
+            font-size: 13px;
+            font-weight: 800;
+            color: #475569;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            padding: 0 4px;
+        }
+
+        .interest-group-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
         .interest-checkbox-wrapper {
             display: inline-flex;
         }
@@ -607,33 +628,36 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 8px 14px;
-            border: 2px solid #e2e8f0;
-            border-radius: 20px;
+            padding: 11px 16px;
+            border: 1px solid #dbe4f0;
+            border-radius: 14px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 600;
-            color: #64748b;
+            color: #334155;
             background: white;
             transition: all 0.2s;
             user-select: none;
         }
 
         .interest-checkbox-input:checked+.interest-checkbox-label {
-            background: #3b82f6;
+            background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
             border-color: #3b82f6;
-            color: white;
+            color: #1d4ed8;
+            box-shadow: 0 10px 24px rgba(59, 130, 246, 0.12);
         }
 
         .interest-checkbox-label:hover {
             border-color: #3b82f6;
-            color: #3b82f6;
+            color: #1d4ed8;
+            background: #f8fbff;
+            transform: translateY(-1px);
         }
 
         .interest-checkbox-input:checked+.interest-checkbox-label:hover {
-            background: #2563eb;
+            background: linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%);
             border-color: #2563eb;
-            color: white;
+            color: #1d4ed8;
         }
 
         .interest-selector {
@@ -716,9 +740,9 @@
 
         .interest-selector-list {
             display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            max-height: 220px;
+            flex-direction: column;
+            gap: 16px;
+            max-height: 340px;
             overflow-y: auto;
             padding-right: 4px;
         }
@@ -879,6 +903,7 @@
     <script src="js/api.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/beta-disclaimer.js"></script>
     <script src="js/reports-bans.js"></script>
     <script src="js/reporting.js"></script>
     <script src="js/profile.js?v=20260324"></script>

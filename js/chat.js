@@ -7,6 +7,8 @@ let TOPICS = null;
 
 const DEFAULT_AVATAR = 'assets/avatar.png';
 const UNREAD_KEY = 'pulse_chat_last_read';
+const ADMIN_MODERATION_CHAT_TITLE = 'Жалобы и апелляции';
+const LEGACY_ADMIN_CHAT_TITLES = new Set(['Reports', ADMIN_MODERATION_CHAT_TITLE]);
 
 let messagePollTimer = null;
 let chatListPollTimer = null;
@@ -20,6 +22,10 @@ let currentChatLastCreatedAt = null;
 let openedChatReadAt = {};
 const renderedMessageKeysByChat = new Map();
 
+function isModerationChat(chat) {
+  return Boolean(chat && !chat.meeting_id && LEGACY_ADMIN_CHAT_TITLES.has(String(chat.title || '').trim()));
+}
+
 function showNotification(message) {
   const notification = document.getElementById('notification');
   if (!notification) return;
@@ -28,6 +34,18 @@ function showNotification(message) {
   setTimeout(() => {
     notification.style.display = 'none';
   }, 2500);
+}
+
+function showChatBootError(error) {
+  const list = document.getElementById('chat-list');
+  const body = document.getElementById('chat-body');
+  const text = error?.message || String(error) || 'Неизвестная ошибка';
+  if (list) {
+    list.innerHTML = `<div class="chat-item" style="white-space:normal;color:#b91c1c;border-color:#fecaca;background:#fef2f2;">Ошибка запуска чатов: ${escapeHtml(text)}</div>`;
+  }
+  if (body) {
+    body.innerHTML = `<div class="chat-empty" style="color:#b91c1c;">Не удалось открыть чаты.<br>${escapeHtml(text)}</div>`;
+  }
 }
 
 function notifyUser(message) {
@@ -59,6 +77,9 @@ function getChatActivityAt(chat) {
 
 function sortChatsByActivity(chatList) {
   chatList.sort((a, b) => {
+    const aPinned = isModerationChat(a) ? 1 : 0;
+    const bPinned = isModerationChat(b) ? 1 : 0;
+    if (aPinned !== bPinned) return bPinned - aPinned;
     const aTime = new Date(getChatActivityAt(a) || 0).getTime();
     const bTime = new Date(getChatActivityAt(b) || 0).getTime();
     return bTime - aTime;
@@ -103,42 +124,60 @@ function refreshChatListOrder() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  currentUser = typeof window.getCurrentUser === 'function'
-    ? await window.getCurrentUser()
-    : await api.request('/api/auth/me');
+async function initChatPage() {
+  try {
+    window.__chatScriptLoaded = true;
+    currentUser = typeof window.getCurrentUser === 'function'
+      ? await window.getCurrentUser()
+      : await api.request('/api/auth/me');
 
-  if (!currentUser) {
-    window.location.href = 'login.html';
-    return;
-  }
-
-  if (currentUser.role === 'banned') {
-    const body = document.getElementById('chat-body');
-    if (body) {
-      body.innerHTML = '<div class="chat-empty"><strong>Ваш аккаунт заблокирован.</strong><br>Вы не можете общаться с другими пользователями.</div>';
+    if (!currentUser) {
+      window.location.href = 'login.html';
+      return;
     }
-    const input = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('chat-send');
-    if (input) input.disabled = true;
-    if (sendBtn) sendBtn.disabled = true;
-    return;
+
+    if (currentUser.role === 'banned') {
+      const body = document.getElementById('chat-body');
+      if (body) {
+        body.innerHTML = '<div class="chat-empty"><strong>Ваш аккаунт заблокирован.</strong><br>Вы не можете общаться с другими пользователями.</div>';
+      }
+      const input = document.getElementById('chat-input');
+      const sendBtn = document.getElementById('chat-send');
+      if (input) input.disabled = true;
+      if (sendBtn) sendBtn.disabled = true;
+      return;
+    }
+
+    if (typeof window.fetchTopics === 'function') {
+      TOPICS = await window.fetchTopics();
+    }
+
+    if (typeof window.cleanupExpiredMeetings === 'function') {
+      await window.cleanupExpiredMeetings();
+    }
+
+    setupChatSelectionFromUrl();
+    await loadChats();
+    setupSendMessage();
+    setupImageUpload();
+    setupTypingIndicator();
+    setupImageModal();
+    setupTitleToggle();
+
+    startChatListPolling();
+  } catch (error) {
+    console.error('Ошибка запуска страницы чатов:', error);
+    showChatBootError(error);
   }
+}
 
-  if (typeof window.fetchTopics === 'function') {
-    TOPICS = await window.fetchTopics();
-  }
+window.__chatScriptLoaded = true;
 
-  setupChatSelectionFromUrl();
-  await loadChats();
-  setupSendMessage();
-  setupImageUpload();
-  setupTypingIndicator();
-  setupImageModal();
-  setupTitleToggle();
-
-  startChatListPolling();
-});
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initChatPage);
+} else {
+  initChatPage();
+}
 
 function getChatDisplayTitle(chat) {
   if (!chat) return 'Чат';
@@ -163,6 +202,75 @@ async function safeInsertChatMember(data) {
   } catch (_e) {
     return await api.insert(TABLES.chat_members, { chat_id: data.chat_id, user_id: data.user_id });
   }
+}
+
+async function ensureModerationChatExistsForAdmins() {
+  if (!currentUser || currentUser.role !== 'admin') return null;
+
+  let admins = [];
+  try {
+    admins = await api.get(TABLES.profiles, { role: 'admin' });
+  } catch (_e) {
+    admins = [];
+  }
+  if (!admins.length) return null;
+
+  let chat = null;
+  try {
+    const rows = await api.get(TABLES.chats, {
+      title: { in: Array.from(LEGACY_ADMIN_CHAT_TITLES) },
+      $order: { column: 'created_at', ascending: false }
+    });
+    chat = (rows || []).find(row => !row.meeting_id) || null;
+  } catch (_e) {
+    chat = null;
+  }
+
+  if (!chat) {
+    try {
+      const inserted = await api.insert(TABLES.chats, {
+        title: ADMIN_MODERATION_CHAT_TITLE,
+        owner_id: admins[0].id
+      });
+      chat = Array.isArray(inserted) ? inserted[0] : inserted;
+    } catch (_e) {
+      chat = null;
+    }
+  }
+  if (!chat) return null;
+
+  chat.title = ADMIN_MODERATION_CHAT_TITLE;
+  chat.is_admin_chat = true;
+  chat.__subTitle = 'Жёлтый чат для жалоб и апелляций';
+
+  let existingMembers = [];
+  try {
+    existingMembers = await api.get(TABLES.chat_members, { chat_id: chat.id });
+  } catch (_e) {
+    existingMembers = [];
+  }
+  const memberIds = new Set((existingMembers || []).map(row => row.user_id).filter(Boolean));
+  const hasStatus = await chatMembersHasStatus();
+
+  for (const admin of admins) {
+    if (!admin?.id || memberIds.has(admin.id)) continue;
+    try {
+      await safeInsertChatMember(hasStatus
+        ? {
+            chat_id: chat.id,
+            user_id: admin.id,
+            role: admin.id === chat.owner_id ? 'owner' : 'member',
+            status: 'approved'
+          }
+        : { chat_id: chat.id, user_id: admin.id }
+      );
+      memberIds.add(admin.id);
+    } catch (_e) {
+      // ignore duplicate/legacy rows
+    }
+  }
+
+  return chat;
 }
 
 async function getOwnedChatsForUser(userId) {
@@ -225,12 +333,61 @@ function stopTypingPolling() {
   typingPollTimer = null;
 }
 
+async function removeChatCompletely(chatId) {
+  if (!chatId) return;
+  try {
+    await api.query(TABLES.chat_messages, 'deleteWhere', {}, { chat_id: chatId });
+  } catch (_e) {}
+  try {
+    await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chatId });
+  } catch (_e) {}
+  try {
+    await api.delete(TABLES.chats, chatId);
+  } catch (_e) {}
+}
+
+async function filterOutStaleMeetingChats(chatRows) {
+  const rows = Array.isArray(chatRows) ? [...chatRows] : [];
+  const meetingChats = rows.filter(chat => chat?.meeting_id);
+  if (!meetingChats.length) return rows;
+
+  const meetingIds = Array.from(new Set(meetingChats.map(chat => chat.meeting_id).filter(Boolean)));
+  let meetings = [];
+  try {
+    meetings = await api.get(TABLES.meetings, { id: { in: meetingIds } });
+  } catch (_e) {
+    return rows;
+  }
+
+  const nowIso = new Date().toISOString();
+  const byId = new Map((meetings || []).map(meeting => [meeting.id, meeting]));
+  const staleChatIds = [];
+  const filtered = rows.filter(chat => {
+    if (!chat?.meeting_id) return true;
+    const meeting = byId.get(chat.meeting_id);
+    if (!meeting) {
+      staleChatIds.push(chat.id);
+      return false;
+    }
+    if (meeting.expires_at && meeting.expires_at <= nowIso) {
+      staleChatIds.push(chat.id);
+      return false;
+    }
+    return true;
+  });
+
+  await Promise.all(staleChatIds.map(chatId => removeChatCompletely(chatId)));
+  return filtered;
+}
+
 async function loadChats(isRefresh = false) {
   const list = document.getElementById('chat-list');
   if (!list) return;
   if (!isRefresh) list.innerHTML = '<div class="chat-item">Загрузка...</div>';
 
   try {
+    const moderationChat = await ensureModerationChatExistsForAdmins();
+
     const hasStatus = await chatMembersHasStatus();
     let memberships = [];
     try {
@@ -243,10 +400,9 @@ async function loadChats(isRefresh = false) {
     }
     const memberChatIds = (memberships || []).map(m => m.chat_id).filter(Boolean);
 
-    // Ensure owner meeting chats are present, but do not resurrect cleared direct chats.
+    // Ensure owner chats are present even if membership rows are missing.
     const ownedChats = await getOwnedChatsForUser(currentUser.id);
-    const ownedMeetingChats = (ownedChats || []).filter(chat => chat && chat.meeting_id);
-    const ownedIds = ownedMeetingChats.map(c => c.id).filter(Boolean);
+    const ownedIds = (ownedChats || []).map(c => c.id).filter(Boolean);
     const missingOwner = ownedIds.filter(id => !memberChatIds.includes(id));
     for (const chatId of missingOwner) {
       try {
@@ -260,23 +416,27 @@ async function loadChats(isRefresh = false) {
       }
     }
 
-    const mergedIds = Array.from(new Set([...memberChatIds, ...ownedIds]));
+    const adminIds = moderationChat?.id ? [moderationChat.id] : [];
+    const mergedIds = Array.from(new Set([...memberChatIds, ...ownedIds, ...adminIds]));
     if (mergedIds.length === 0) {
       chats = [];
+    } else {
+      const chatsRows = await api.get(TABLES.chats, {
+        id: { in: mergedIds },
+        $order: { column: 'created_at', ascending: false }
+      });
+      chats = await filterOutStaleMeetingChats(Array.isArray(chatsRows) ? chatsRows : []);
+    }
+
+    await enrichChatsForUi(chats);
+    await hydrateChatActivity(chats);
+
+    if (chats.length === 0) {
       list.innerHTML = '<div class="chat-item">Нет чатов</div>';
       renderEmptyChat();
       return;
     }
 
-    const chatsRows = await api.get(TABLES.chats, {
-      id: { in: mergedIds },
-      $order: { column: 'created_at', ascending: false }
-    });
-
-    chats = Array.isArray(chatsRows) ? chatsRows : [];
-
-    await enrichChatsForUi(chats);
-    await hydrateChatActivity(chats);
     sortChatsByActivity(chats);
     renderChatList(list);
 
@@ -350,7 +510,7 @@ function renderChatList(list) {
   chats.forEach(chat => {
     const item = document.createElement('div');
     item.className = 'chat-item';
-    if (chat.is_admin_chat) item.classList.add('chat-item-admin');
+    if (chat.is_admin_chat || isModerationChat(chat)) item.classList.add('chat-item-admin');
     item.dataset.chatId = chat.id;
 
     const title = getChatDisplayTitle(chat);
@@ -359,7 +519,7 @@ function renderChatList(list) {
         <div class="chat-item-title">${escapeHtml(title)}</div>
         <div class="chat-unread" style="display:none;"></div>
       </div>
-      <div class="chat-item-sub">${chat.meeting_id ? 'Чат встречи' : 'Личный чат'}</div>
+      <div class="chat-item-sub">${escapeHtml(chat.__subTitle || (isModerationChat(chat) ? 'Жалобы и апелляции' : (chat.meeting_id ? 'Чат встречи' : 'Личный чат')))}</div>
     `;
 
     item.onclick = () => openChat(chat.id);
@@ -396,13 +556,12 @@ async function updateChatListUnreadBadges() {
     const readKey = `${currentUser.id}:${chat.id}`;
     const lastRead = openedChatReadAt[chat.id] || readMap[readKey];
 
-    const filters = {
-      chat_id: chat.id,
-      user_id: { neq: currentUser.id }
-    };
-    if (lastRead) filters.created_at = { gt: lastRead };
-
     try {
+      const filters = {
+        chat_id: chat.id,
+        user_id: { neq: currentUser.id }
+      };
+      if (lastRead) filters.created_at = { gt: lastRead };
       const result = await api.query(TABLES.chat_messages, 'count', {}, filters);
       const count = Number(result && result.count) || 0;
       if (count > 0) {
@@ -437,7 +596,10 @@ async function openChat(chatId) {
   const input = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
   const attachBtn = document.getElementById('chat-attach');
-  if (input) input.disabled = false;
+  if (input) {
+    input.disabled = false;
+    input.placeholder = 'Сообщение...';
+  }
   if (sendBtn) sendBtn.disabled = false;
   if (attachBtn) attachBtn.disabled = false;
 
@@ -1039,6 +1201,18 @@ async function renderInfoPanel(chat) {
     await renderMeetingInfo(chat, content);
     return;
   }
+  if (isModerationChat(chat)) {
+    content.innerHTML = `
+      <div class="chat-empty" style="text-align:left;">
+        <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Жалобы и апелляции</div>
+        <div style="color:#475569;line-height:1.5;">
+          Это общий админский чат. Сюда автоматически попадают новые жалобы и запросы на разбан,
+          а администраторы могут обсуждать их прямо здесь.
+        </div>
+      </div>
+    `;
+    return;
+  }
   await renderDirectInfo(chat, content);
 }
 
@@ -1067,7 +1241,7 @@ async function renderMeetingInfo(chat, contentEl) {
   }
 
   const topic = TOPICS && meeting.topic ? (TOPICS.find(t => t.id === meeting.topic) || null) : null;
-  const tagLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
+  const tagLabel = topic ? `#${getTopicDisplayName(topic)}` : '#Встреча';
   const tagStyle = topic?.color ? `style="background:${escapeHtml(topic.color)}20;color:${escapeHtml(topic.color)}"` : '';
 
   const location = meeting.location || 'Город не указан';
@@ -1309,7 +1483,7 @@ async function renderDirectInfo(chat, contentEl) {
   const interests = Array.isArray(peer.interests) ? peer.interests : [];
   const pills = interests.map(id => {
     const topic = TOPICS ? TOPICS.find(t => t.id === id) : null;
-    const label = topic?.name ? topic.name : String(id);
+    const label = topic ? getTopicDisplayName(topic) : String(id);
     return `<div class="info-pill">${escapeHtml(label)}</div>`;
   }).join('');
 
@@ -1348,5 +1522,3 @@ function escapeHtml(value) {
     .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
-
-

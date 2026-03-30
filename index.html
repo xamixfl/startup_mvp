@@ -214,9 +214,24 @@
             margin-bottom: 20px;
         }
 
+        .filter-section.menu-open > .filter-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
         .filter-section h3 {
             font-size: 16px;
             color: #64748b;
+        }
+
+        .filter-click-zone {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+            cursor: pointer;
+            padding-right: 20px;
         }
 
         .filter-trigger {
@@ -224,7 +239,7 @@
             flex-direction: column;
             align-items: flex-start;
             gap: 8px;
-            cursor: default;
+            cursor: inherit;
         }
 
         .filter-current {
@@ -238,10 +253,22 @@
         }
 
         .selected-topic-pills {
-            display: none;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
         }
 
         .selected-topic-pills:empty {
+            display: none;
+        }
+
+        .selected-city-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .selected-city-pills:empty {
             display: none;
         }
 
@@ -283,12 +310,81 @@
             content: '';
         }
 
-        .city-filter-current {
-            font-size: 13px;
-            color: #1e293b;
-            background: #f1f5f9;
+        .selected-city-pill {
+            display: inline-flex;
+            align-items: center;
             padding: 6px 10px;
+            border: none;
             border-radius: 999px;
+            background: #f1f5f9;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .selected-city-pill:hover {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .selected-city-pill::after {
+            content: ' ×';
+            font-weight: 700;
+        }
+
+        .selected-city-pill.static {
+            cursor: default;
+        }
+
+        .selected-city-pill.static:hover {
+            background: #f1f5f9;
+            color: #334155;
+        }
+
+        .selected-city-pill.static::after {
+            content: '';
+        }
+
+        .city-filter-items {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 0;
+            margin: 0;
+        }
+
+        .city-filter-items li {
+            list-style: none;
+        }
+
+        .city-filter-tag {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            color: #334155;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            text-align: left;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        .city-filter-tag:hover {
+            border-color: #bfdbfe;
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+
+        .city-filter-tag.active {
+            background: #eff6ff;
+            border-color: #93c5fd;
+            color: #1d4ed8;
+            font-weight: 600;
         }
 
         .filter-menu {
@@ -313,6 +409,11 @@
             z-index: 10;
         }
 
+        #filter-tags {
+            max-height: 420px;
+            gap: 14px;
+        }
+
         .city-search-input,
         .topic-search-input {
             padding: 8px 12px;
@@ -331,32 +432,109 @@
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
-        .filter-menu li {
-            list-style: none;
+        .topic-filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-top: 6px;
+            border-top: 1px solid #eef2f7;
         }
 
-        .filter-section:hover .filter-menu,
-        .filter-section:focus-within .filter-menu {
-            opacity: 1;
-            visibility: visible;
-            transform: translateY(0);
+        .topic-filter-group:first-of-type {
+            border-top: none;
+            padding-top: 0;
         }
 
-        .filter-tag {
-            background: #f1f5f9;
-            border: none;
-            padding: 8px 14px;
-            border-radius: 10px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
+        .topic-filter-group-trigger {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
             width: 100%;
+            padding: 8px 4px 2px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
             text-align: left;
         }
 
+        .topic-filter-group-trigger-main {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .topic-filter-group-icon {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .topic-filter-group-title {
+            font-size: 12px;
+            font-weight: 800;
+            color: #475569;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+
+        .topic-filter-group-arrow {
+            color: #94a3b8;
+            font-size: 11px;
+            transition: transform 0.2s ease, color 0.2s ease;
+        }
+
+        .topic-filter-group.open .topic-filter-group-arrow {
+            transform: rotate(180deg);
+            color: #3b82f6;
+        }
+
+        .topic-filter-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 0 0 4px;
+        }
+
+        .topic-filter-options[hidden] {
+            display: none;
+        }
+
+        .filter-tag {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: auto;
+            text-align: left;
+            color: #334155;
+        }
+
+        .topic-filter-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .topic-filter-option-icon {
+            font-size: 16px;
+            line-height: 1;
+        }
+
         .filter-tag.active {
-            background: #3b82f6;
-            color: white;
+            background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+            border-color: #93c5fd;
+            color: #1d4ed8;
+            box-shadow: 0 10px 24px rgba(59, 130, 246, 0.12);
+        }
+
+        .filter-tag:hover {
+            border-color: #93c5fd;
+            background: #f8fbff;
+            color: #1d4ed8;
         }
 
         .sidebar-divider {
@@ -855,20 +1033,24 @@
             </a>
 
             <div class="filter-section" tabindex="0">
-                <div class="filter-trigger">
-                    <h3>Категории</h3>
-                    <div class="filter-current"></div>
+                <div class="filter-click-zone">
+                    <div class="filter-trigger">
+                        <h3>Категории</h3>
+                        <div class="filter-current"></div>
+                    </div>
+                    <div class="selected-topic-pills" id="selected-topic-pills"></div>
                 </div>
-                <div class="selected-topic-pills" id="selected-topic-pills"></div>
-                <ul class="filter-menu" id="filter-tags">
+                <div class="filter-menu" id="filter-tags">
                     <!-- Фильтры будут добавлены через JS -->
-                </ul>
+                </div>
             </div>
 
             <div class="filter-section" tabindex="0">
-                <div class="filter-trigger">
-                    <h3>Города</h3>
-                    <span class="city-filter-current">Все города</span>
+                <div class="filter-click-zone">
+                    <div class="filter-trigger">
+                        <h3>Города</h3>
+                    </div>
+                    <div class="selected-city-pills" id="selected-city-pills"></div>
                 </div>
                 <div class="filter-menu" id="city-filter-list" style="flex-direction: column;">
                     <!-- Города и поиск будут добавлены через JS -->
@@ -961,6 +1143,7 @@
     <script src="js/api.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/beta-disclaimer.js"></script>
     <script src="js/index.js"></script>
 </body>
 

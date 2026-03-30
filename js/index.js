@@ -49,6 +49,47 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupGlobalSearch();
 });
 
+function setupFilterDropdowns() {
+  const sections = Array.from(document.querySelectorAll('.filter-section'));
+  if (sections.length === 0) return;
+
+  sections.forEach(section => {
+    const clickZone = section.querySelector('.filter-click-zone');
+    if (!clickZone || clickZone.dataset.bound === 'true') return;
+
+    const toggleSection = (event) => {
+      event.stopPropagation();
+      const shouldOpen = !section.classList.contains('menu-open');
+      sections.forEach(item => item.classList.remove('menu-open'));
+      if (shouldOpen) section.classList.add('menu-open');
+    };
+
+    clickZone.addEventListener('click', (event) => {
+      if (event.target.closest('.selected-topic-pill:not(.static), .selected-city-pill:not(.static)')) return;
+      toggleSection(event);
+    });
+
+    const menu = section.querySelector('.filter-menu');
+    if (menu) {
+      menu.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+    }
+
+    clickZone.dataset.bound = 'true';
+  });
+
+  document.addEventListener('click', () => {
+    sections.forEach(section => section.classList.remove('menu-open'));
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      sections.forEach(section => section.classList.remove('menu-open'));
+    }
+  });
+}
+
 async function initApp() {
   currentUser = typeof window.getCurrentUser === 'function'
     ? await window.getCurrentUser()
@@ -58,6 +99,7 @@ async function initApp() {
 
   loadFilters();
   loadCitiesFromDatabase();
+  setupFilterDropdowns();
 }
 
 function updateUserUI(user) {
@@ -145,49 +187,98 @@ function loadFilters() {
 
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
-  searchInput.placeholder = 'Поиск тем...';
+  searchInput.placeholder = 'Поиск интересов...';
   searchInput.className = 'topic-search-input';
   searchInput.style.display = 'block';
   searchInput.style.marginBottom = '8px';
   searchInput.addEventListener('input', (e) => filterTopicList(e.target.value));
   container.appendChild(searchInput);
 
-  const allItem = document.createElement('li');
   const allButton = document.createElement('button');
   allButton.className = 'filter-tag active';
   allButton.textContent = 'Все категории';
   allButton.onclick = (event) => filterMeetings('all', event);
-  allItem.appendChild(allButton);
-  container.appendChild(allItem);
+  container.appendChild(allButton);
 
-  TOPICS.forEach(topic => {
-    const item = document.createElement('li');
-    const button = document.createElement('button');
-    button.className = 'filter-tag';
-    button.textContent = topic.name;
-    button.setAttribute('data-topic-id', topic.id);
-    button.onclick = (event) => filterMeetings(topic.id, event);
-    item.appendChild(button);
-    container.appendChild(item);
+  const groups = typeof window.groupTopicsForDisplay === 'function'
+    ? window.groupTopicsForDisplay(TOPICS)
+    : [{ title: 'Категории', items: TOPICS }];
+
+  groups.forEach(group => {
+    const groupWrap = document.createElement('section');
+    groupWrap.className = 'topic-filter-group';
+    groupWrap.dataset.groupId = group.id || '';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'topic-filter-group-trigger';
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.innerHTML = `
+      <span class="topic-filter-group-trigger-main">
+        ${group.icon ? `<span class="topic-filter-group-icon">${escapeHtml(group.icon)}</span>` : ''}
+        <span class="topic-filter-group-title">${escapeHtml(group.title)}</span>
+      </span>
+      <span class="topic-filter-group-arrow">▼</span>
+    `;
+
+    const options = document.createElement('div');
+    options.className = 'topic-filter-options';
+    options.hidden = true;
+
+    group.items.forEach(topic => {
+      const button = document.createElement('button');
+      button.className = 'filter-tag topic-filter-option';
+      const icon = typeof window.getTopicIcon === 'function' ? window.getTopicIcon(topic) : '';
+      const label = typeof window.getTopicDisplayName === 'function'
+        ? window.getTopicDisplayName(topic)
+        : topic.name;
+      button.innerHTML = `${icon ? `<span class="topic-filter-option-icon">${escapeHtml(icon)}</span>` : ''}<span>${escapeHtml(label)}</span>`;
+      button.setAttribute('data-topic-id', topic.id);
+      button.onclick = (event) => filterMeetings(topic.id, event);
+      options.appendChild(button);
+    });
+
+    trigger.onclick = () => toggleTopicGroup(groupWrap);
+    groupWrap.appendChild(trigger);
+    groupWrap.appendChild(options);
+    container.appendChild(groupWrap);
   });
 
   updateTopicFilterUI();
 }
 
+function setTopicGroupOpen(groupEl, isOpen) {
+  const trigger = groupEl?.querySelector('.topic-filter-group-trigger');
+  const options = groupEl?.querySelector('.topic-filter-options');
+  if (!trigger || !options) return;
+  groupEl.classList.toggle('open', Boolean(isOpen));
+  trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  options.hidden = !isOpen;
+}
+
+function toggleTopicGroup(groupEl) {
+  if (!groupEl) return;
+  const shouldOpen = !groupEl.classList.contains('open');
+  setTopicGroupOpen(groupEl, shouldOpen);
+}
+
 function filterTopicList(searchTerm) {
   const container = document.getElementById('filter-tags');
   if (!container) return;
-  const items = container.querySelectorAll('li');
+  const normalized = String(searchTerm || '').toLowerCase();
 
-  items.forEach(item => {
-    const button = item.querySelector('.filter-tag');
-    if (!button) return;
-    if (button.textContent === 'Все категории') {
-      item.style.display = 'list-item';
-      return;
-    }
-    const matches = button.textContent.toLowerCase().includes(String(searchTerm || '').toLowerCase());
-    item.style.display = matches ? 'list-item' : 'none';
+  const allButton = container.querySelector('.filter-tag:not([data-topic-id])');
+  if (allButton) allButton.style.display = '';
+
+  container.querySelectorAll('.topic-filter-group').forEach(group => {
+    let visible = 0;
+    group.querySelectorAll('.topic-filter-option').forEach(button => {
+      const matches = button.textContent.toLowerCase().includes(normalized);
+      button.style.display = matches ? '' : 'none';
+      if (matches) visible += 1;
+    });
+    group.style.display = visible > 0 ? '' : 'none';
+    setTopicGroupOpen(group, normalized ? visible > 0 : group.classList.contains('open'));
   });
 }
 
@@ -197,10 +288,16 @@ function populateTopicDropdown() {
 
   while (select.options.length > 1) select.remove(1);
 
-  TOPICS.forEach(topic => {
+  const selectableTopics = typeof window.getSelectableTopics === 'function'
+    ? window.getSelectableTopics(TOPICS)
+    : TOPICS.filter(topic => !topic?.is_group);
+
+  selectableTopics.forEach(topic => {
     const option = document.createElement('option');
     option.value = topic.id;
-    option.textContent = topic.name;
+    option.textContent = typeof window.getTopicDisplayName === 'function'
+      ? window.getTopicDisplayName(topic)
+      : topic.name;
     select.appendChild(option);
   });
 }
@@ -224,24 +321,16 @@ function loadCityFilters() {
 
   allCities.forEach(city => {
     const item = document.createElement('li');
-    const label = document.createElement('label');
-    label.className = 'city-filter-item';
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = selectedCities.has(city);
-    checkbox.onchange = () => toggleCity(city);
-
-    const span = document.createElement('span');
-    span.textContent = city;
-
-    label.appendChild(checkbox);
-    label.appendChild(span);
-    item.appendChild(label);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `city-filter-tag${selectedCities.has(city) ? ' active' : ''}`;
+    button.textContent = city;
+    button.onclick = () => toggleCity(city);
+    item.appendChild(button);
     citiesList.appendChild(item);
   });
 
-  updateCityLabel();
+  updateCityFilterUI();
 }
 
 function filterCityList(searchTerm) {
@@ -250,28 +339,64 @@ function filterCityList(searchTerm) {
   const items = container.querySelectorAll('li');
   const term = String(searchTerm || '').toLowerCase();
   items.forEach(item => {
-    const label = item.querySelector('span');
-    if (!label) return;
-    item.style.display = label.textContent.toLowerCase().includes(term) ? 'list-item' : 'none';
+    const button = item.querySelector('.city-filter-tag');
+    if (!button) return;
+    item.style.display = button.textContent.toLowerCase().includes(term) ? 'list-item' : 'none';
   });
 }
 
 function toggleCity(city) {
   if (selectedCities.has(city)) selectedCities.delete(city);
   else selectedCities.add(city);
-  updateCityLabel();
+  updateCityFilterUI();
   renderFilteredMeetings();
 }
 
 function updateCityLabel() {
-  const label = document.querySelector('.city-filter-current');
-  if (!label) return;
+  return;
+}
+
+function renderSelectedCityPills() {
+  const container = document.getElementById('selected-city-pills');
+  if (!container) return;
+  container.innerHTML = '';
+
   if (selectedCities.size === 0) {
-    label.textContent = 'Все города';
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'selected-city-pill static';
+    pill.textContent = 'Все города';
+    container.appendChild(pill);
     return;
   }
-  const cities = Array.from(selectedCities);
-  label.textContent = cities.length <= 2 ? cities.join(', ') : `${cities.slice(0, 2).join(', ')} +${cities.length - 2}`;
+
+  Array.from(selectedCities).forEach(city => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'selected-city-pill';
+    pill.textContent = city;
+    pill.addEventListener('click', () => removeSelectedCity(city));
+    container.appendChild(pill);
+  });
+}
+
+function updateCityFilterButtons() {
+  document.querySelectorAll('.city-filter-tag').forEach(button => {
+    button.classList.toggle('active', selectedCities.has(button.textContent));
+  });
+}
+
+function removeSelectedCity(city) {
+  if (!selectedCities.has(city)) return;
+  selectedCities.delete(city);
+  updateCityFilterUI();
+  renderFilteredMeetings();
+}
+
+function updateCityFilterUI() {
+  updateCityFilterButtons();
+  updateCityLabel();
+  renderSelectedCityPills();
 }
 
 async function loadMeetings() {
@@ -353,7 +478,8 @@ function renderMeetings(meetings) {
     const creatorAvatar = meeting.creator?.photo_URL && meeting.creator?.photo_URL !== 'user'
       ? meeting.creator.photo_URL
       : DEFAULT_AVATAR;
-    const topicLabel = topic?.name ? `#${topic.name.replace(/^(\S+)\s/, '')}` : '#Встреча';
+    const topicIcon = typeof window.getTopicIcon === 'function' ? window.getTopicIcon(topic) : '';
+    const topicLabel = topic ? `#${topicIcon ? `${topicIcon} ` : ''}${getTopicDisplayName(topic)}` : '#Встреча';
     const locationLabel = meeting.location || 'Город не указан';
 
     const countdownLabel = buildMeetingCountdownLabel(meeting.expires_at);
@@ -437,6 +563,17 @@ function setActiveFilterButtons() {
   });
 }
 
+function syncTopicGroupVisibility() {
+  const groups = Array.from(document.querySelectorAll('#filter-tags .topic-filter-group'));
+
+  groups.forEach(group => {
+    const hasSelectedChild = Array.from(group.querySelectorAll('.topic-filter-option'))
+      .some(button => selectedTopics.has(button.getAttribute('data-topic-id')));
+    const shouldOpen = hasSelectedChild;
+    setTopicGroupOpen(group, shouldOpen);
+  });
+}
+
 function loadCitiesFromDatabase() {
   allCities = [...BASE_CITIES];
   loadCityFilters();
@@ -478,7 +615,9 @@ function updateFilterLabel() {
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'selected-topic-pill';
-    pill.textContent = topic.name.replace(/^\S+\s/, '');
+    pill.textContent = typeof window.getTopicDisplayName === 'function'
+      ? window.getTopicDisplayName(topic)
+      : topic.name.replace(/^\S+\s/, '');
     pill.addEventListener('click', () => removeSelectedTopic(topic.id));
     label.appendChild(pill);
   });
@@ -495,7 +634,9 @@ function renderSelectedTopicPills() {
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'selected-topic-pill';
-    pill.textContent = topic.name.replace(/^\S+\s/, '');
+    pill.textContent = typeof window.getTopicDisplayName === 'function'
+      ? window.getTopicDisplayName(topic)
+      : topic.name.replace(/^\S+\s/, '');
     pill.addEventListener('click', () => removeSelectedTopic(topic.id));
     container.appendChild(pill);
   });
@@ -510,6 +651,7 @@ function removeSelectedTopic(topicId) {
 
 function updateTopicFilterUI() {
   setActiveFilterButtons();
+  syncTopicGroupVisibility();
   updateFilterLabel();
   renderSelectedTopicPills();
 }
@@ -724,12 +866,15 @@ async function updateMyEventsBadge() {
   if (!badge || !currentUser) return;
 
   try {
-    const result = await api.query(TABLES.notifications, 'count', {}, {
+    const rows = await api.get(TABLES.notifications, {
       admin_profile_id: currentUser.id,
-      is_read: false,
-      notification_type: { in: PARTICIPATION_NOTIFICATION_TYPES }
+      $order: { column: 'created_at', ascending: false },
+      $limit: 50
     });
-    const total = Number(result && result.count) || 0;
+    const total = (rows || []).filter(item =>
+      PARTICIPATION_NOTIFICATION_TYPES.includes(item.notification_type) &&
+      item.is_read !== true
+    ).length;
     if (total > 0) {
       badge.textContent = total > 99 ? '99+' : String(total);
       badge.style.display = 'flex';

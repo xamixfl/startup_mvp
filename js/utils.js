@@ -1,7 +1,8 @@
 ﻿async function fetchTopics() {
   const { TABLES } = window.APP || {};
   try {
-    return await api.get(TABLES.topics, { $order: { column: 'name', ascending: true } });
+    const rows = await api.get(TABLES.topics, { $order: { column: 'sort_order', ascending: true } });
+    return sortTopicsForDisplay(rows || []);
   } catch (error) {
     console.error('Error fetching topics:', error);
     return [];
@@ -40,8 +41,15 @@ async function deleteExpiredMeeting(meetingId) {
     const chat = (chats || [])[0];
 
     if (chat && chat.id) {
-      // Keep the meeting chat intact even after the meeting is deleted.
-      // This prevents turning a meeting chat into a broken direct chat.
+      try {
+        await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: chat.id });
+      } catch (_e) {}
+      try {
+        await api.query(TABLES.chat_messages, 'deleteWhere', {}, { chat_id: chat.id });
+      } catch (_e) {}
+      try {
+        await api.delete(TABLES.chats, chat.id);
+      } catch (_e) {}
     }
 
     await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });
@@ -74,6 +82,101 @@ function buildMeetingCountdownLabel(expiresAt) {
   return `\u23f1 ${raw}`;
 }
 
+function stripTopicEmoji(value) {
+  return String(value || '')
+    .replace(/^([\p{Extended_Pictographic}\uFE0F\u200D]+)\s*/u, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getTopicLocalizedField(topic, baseKey) {
+  if (!topic || typeof topic !== 'object') return '';
+  const htmlLang = String(document?.documentElement?.lang || '').toLowerCase();
+  const preferredKeys = htmlLang.startsWith('en')
+    ? [`${baseKey}_en`, `${baseKey}_ru`, baseKey]
+    : [`${baseKey}_ru`, `${baseKey}_en`, baseKey];
+
+  for (const key of preferredKeys) {
+    const value = String(topic[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function getTopicIcon(topic) {
+  if (!topic || typeof topic !== 'object') return '';
+  return String(topic.icon || '').trim();
+}
+
+function getTopicDisplayName(topicOrId, fallbackName = '') {
+  const topicId = typeof topicOrId === 'object' && topicOrId ? String(topicOrId.id || '') : String(topicOrId || '');
+  const rawName = typeof topicOrId === 'object' && topicOrId
+    ? getTopicLocalizedField(topicOrId, 'name') || fallbackName || topicId
+    : fallbackName || topicId;
+  return stripTopicEmoji(rawName) || topicId;
+}
+
+function getTopicSortOrder(topic) {
+  const value = Number(topic?.sort_order);
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function compareTopics(a, b) {
+  const orderDiff = getTopicSortOrder(a) - getTopicSortOrder(b);
+  if (orderDiff !== 0) return orderDiff;
+  return getTopicDisplayName(a).localeCompare(getTopicDisplayName(b), 'ru', { sensitivity: 'base' });
+}
+
+function sortTopicsForDisplay(topics) {
+  return [...(topics || [])].sort(compareTopics);
+}
+
+function isTopicGroup(topic) {
+  return Boolean(topic?.is_group === true);
+}
+
+function getSelectableTopics(topics) {
+  return sortTopicsForDisplay((topics || []).filter(topic => !isTopicGroup(topic)));
+}
+
+function groupTopicsForDisplay(topics) {
+  const allTopics = sortTopicsForDisplay(topics || []);
+  const groups = allTopics.filter(isTopicGroup);
+  const children = allTopics.filter(topic => !isTopicGroup(topic));
+
+  if (groups.length === 0) {
+    return children.length > 0 ? [{ id: 'all_topics', title: 'Интересы', items: children }] : [];
+  }
+
+  const byParent = new Map();
+  children.forEach(topic => {
+    const parentId = topic.parent_topic_id || '';
+    if (!byParent.has(parentId)) byParent.set(parentId, []);
+    byParent.get(parentId).push(topic);
+  });
+
+  const result = groups.map(group => ({
+    id: group.id,
+    title: getTopicDisplayName(group),
+    icon: String(group.icon || '').trim(),
+    items: sortTopicsForDisplay(byParent.get(group.id) || [])
+  })).filter(group => group.items.length > 0);
+
+  const orphanTopics = sortTopicsForDisplay(
+    children.filter(topic => !topic.parent_topic_id || !groups.some(group => group.id === topic.parent_topic_id))
+  );
+  if (orphanTopics.length > 0) {
+    result.push({
+      id: 'ungrouped_topics',
+      title: 'Другие интересы',
+      icon: '',
+      items: orphanTopics
+    });
+  }
+
+  return result;
+}
+
 async function createUserNotification(recipientId, payload = {}) {
   const { TABLES } = window.APP || {};
   if (!recipientId || !TABLES?.notifications) return null;
@@ -84,7 +187,9 @@ async function createUserNotification(recipientId, payload = {}) {
     related_table: payload.related_table || 'meetings',
     related_id: payload.related_id,
     title: payload.title || 'Обновление по встрече',
-    message: payload.message || ''
+    message: payload.message || '',
+    is_read: false,
+    read_at: null
   };
 
   if (!notification.related_id) return null;
@@ -120,4 +225,7 @@ window.createUserNotification = createUserNotification;
 window.postChatSystemMessage = postChatSystemMessage;
 window.formatMeetingCountdown = formatMeetingCountdown;
 window.buildMeetingCountdownLabel = buildMeetingCountdownLabel;
-
+window.getTopicIcon = getTopicIcon;
+window.getTopicDisplayName = getTopicDisplayName;
+window.groupTopicsForDisplay = groupTopicsForDisplay;
+window.getSelectableTopics = getSelectableTopics;
