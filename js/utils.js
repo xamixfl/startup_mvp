@@ -206,11 +206,11 @@ async function createUserNotification(recipientId, payload = {}) {
 async function postChatSystemMessage(chatId, message, actorId) {
   const { TABLES } = window.APP || {};
   if (!chatId || !message || !TABLES?.chat_messages) return null;
-  const payload = { chat_id: chatId, content: `system:${message}` };
-  if (actorId) payload.user_id = actorId;
   try {
-    const rows = await api.insert(TABLES.chat_messages, payload);
-    return Array.isArray(rows) ? rows[0] || null : null;
+    return await api.request(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content: `system:${message}`, actor_id: actorId || null })
+    });
   } catch (error) {
     console.warn('postChatSystemMessage failed:', error);
     return null;

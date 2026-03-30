@@ -405,19 +405,17 @@ async function loadMeetings() {
 
   try {
     const nowIso = new Date().toISOString();
-    const meetings = await api.get(TABLES.meetings, {
-      expires_at: { gt: nowIso },
-      $order: { column: 'created_at', ascending: false }
-    });
+    const meetings = await api.request('/api/feed/meetings');
+    const activeMeetings = (meetings || []).filter(meeting => meeting?.expires_at && meeting.expires_at > nowIso);
 
-    if (!meetings || meetings.length === 0) {
+    if (!activeMeetings || activeMeetings.length === 0) {
       allMeetings = [];
       loadCityFilters();
       renderEmptyState();
       return;
     }
 
-    const uniqueMeetings = Array.from(new Map(meetings.map(m => [m.id, m])).values());
+    const uniqueMeetings = Array.from(new Map(activeMeetings.map(m => [m.id, m])).values());
 
     // If user just created a meeting and returned to the feed, ensure it shows up.
     // This also helps debug cases where the list query filters it out unexpectedly.
@@ -437,8 +435,7 @@ async function loadMeetings() {
       if (lastCreatedId) localStorage.removeItem('last_created_meeting_id');
     } catch (_e) { /* ignore */ }
 
-    const meetingsWithCreators = await attachCreators(uniqueMeetings);
-    allMeetings = meetingsWithCreators;
+    allMeetings = uniqueMeetings;
     loadCityFilters();
     renderFilteredMeetings();
   } catch (error) {
@@ -510,19 +507,6 @@ function renderMeetings(meetings) {
     `;
     feed.appendChild(meetingCard);
   });
-}
-
-async function attachCreators(meetings) {
-  const creatorIds = Array.from(new Set(meetings.map(m => m.creator_id).filter(Boolean)));
-  if (creatorIds.length === 0) return meetings.map(m => ({ ...m, creator: null }));
-
-  try {
-    const profiles = await api.get(TABLES.profiles, { id: { in: creatorIds } });
-    const byId = new Map((profiles || []).map(p => [p.id, p]));
-    return meetings.map(m => ({ ...m, creator: byId.get(m.creator_id) || null }));
-  } catch (e) {
-    return meetings.map(m => ({ ...m, creator: null }));
-  }
 }
 
 function showCreateModal() {
@@ -811,29 +795,19 @@ async function updateChatBadge() {
       readMap = raw ? JSON.parse(raw) : {};
     } catch (e) { /* ignore */ }
 
-    const memberships = await api.get(TABLES.chat_members, {
-      user_id: currentUser.id,
-      status: 'approved'
+    const perChatReadMap = {};
+    Object.entries(readMap).forEach(([key, value]) => {
+      const prefix = `${currentUser.id}:`;
+      if (key.startsWith(prefix)) {
+        perChatReadMap[key.slice(prefix.length)] = value;
+      }
     });
-    if (!memberships || memberships.length === 0) {
-      badge.style.display = 'none';
-      return;
-    }
 
-    const chatIds = memberships.map(m => m.chat_id).filter(Boolean);
-    let total = 0;
-
-    for (const chatId of chatIds) {
-      const readKey = `${currentUser.id}:${chatId}`;
-      const lastRead = readMap[readKey];
-      const filters = {
-        chat_id: chatId,
-        user_id: { neq: currentUser.id }
-      };
-      if (lastRead) filters.created_at = { gt: lastRead };
-      const result = await api.query(TABLES.chat_messages, 'count', {}, filters);
-      total += Number(result && result.count) || 0;
-    }
+    const summary = await api.request('/api/chats/unread-summary', {
+      method: 'POST',
+      body: JSON.stringify({ lastReadMap: perChatReadMap })
+    });
+    const total = Number(summary?.total || 0);
 
     if (total > 0) {
       badge.textContent = total > 99 ? '99+' : String(total);
@@ -1038,3 +1012,4 @@ function renderMeetingResult(meeting) {
   `;
   return item;
 }
+

@@ -31,6 +31,120 @@ const port = Number(process.env.PORT || 3000);
 // Minimal in-memory typing state: { chatId -> { userId -> expiresAtMs } }
 const typingState = new Map();
 const TYPING_TTL_MS = 3500;
+const schemaColumnCache = new Map();
+const eventClients = new Map();
+
+async function tableHasColumn(tableName, columnName) {
+  const cacheKey = `${tableName}:${columnName}`;
+  if (schemaColumnCache.has(cacheKey)) {
+    return schemaColumnCache.get(cacheKey);
+  }
+
+  const result = await query(
+    `SELECT 1
+       FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = $1
+        AND column_name = $2
+      LIMIT 1`,
+    [tableName, columnName]
+  );
+  const hasColumn = result.rowCount > 0;
+  schemaColumnCache.set(cacheKey, hasColumn);
+  return hasColumn;
+}
+
+async function getTableColumns(tableName) {
+  const cacheKey = `${tableName}:__all__`;
+  if (schemaColumnCache.has(cacheKey)) {
+    return schemaColumnCache.get(cacheKey);
+  }
+
+  const result = await query(
+    `SELECT column_name
+       FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = $1`,
+    [tableName]
+  );
+  const columns = new Set((result.rows || []).map(row => row.column_name).filter(Boolean));
+  schemaColumnCache.set(cacheKey, columns);
+  return columns;
+}
+
+function addEventClient(userId, res) {
+  const key = String(userId);
+  if (!eventClients.has(key)) {
+    eventClients.set(key, new Set());
+  }
+  eventClients.get(key).add(res);
+}
+
+function removeEventClient(userId, res) {
+  const key = String(userId);
+  const set = eventClients.get(key);
+  if (!set) return;
+  set.delete(res);
+  if (set.size === 0) {
+    eventClients.delete(key);
+  }
+}
+
+function sendEventToUser(userId, eventName, payload) {
+  const key = String(userId);
+  const clients = eventClients.get(key);
+  if (!clients || clients.size === 0) return;
+  const data = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of clients) {
+    try {
+      res.write(data);
+    } catch (_e) {
+      removeEventClient(key, res);
+    }
+  }
+}
+
+async function getChatAudience(chatId) {
+  const hasStatus = await tableHasColumn('chat_members', 'status');
+  const membershipWhere = hasStatus ? ` AND cm.status = 'approved'` : '';
+  const result = await query(
+    `SELECT DISTINCT user_id
+       FROM (
+         SELECT cm.user_id
+           FROM chat_members cm
+          WHERE cm.chat_id = $1${membershipWhere}
+         UNION
+         SELECT c.owner_id AS user_id
+           FROM chats c
+          WHERE c.id = $1
+       ) audience
+      WHERE user_id IS NOT NULL`,
+    [chatId]
+  );
+  return Array.from(new Set((result.rows || []).map(row => String(row.user_id)).filter(Boolean)));
+}
+
+async function broadcastToChat(chatId, eventName, payload) {
+  const audience = await getChatAudience(chatId);
+  audience.forEach(userId => sendEventToUser(userId, eventName, payload));
+}
+
+async function ensureChatAccess(chatId, userId) {
+  const hasStatus = await tableHasColumn('chat_members', 'status');
+  const membershipWhere = hasStatus ? ` AND cm.status = 'approved'` : '';
+  const result = await query(
+    `SELECT c.id
+       FROM chats c
+       LEFT JOIN chat_members cm
+         ON cm.chat_id = c.id
+        AND cm.user_id = $2${membershipWhere}
+      WHERE c.id = $1
+        AND (c.owner_id = $2 OR cm.user_id IS NOT NULL)
+      LIMIT 1`,
+    [chatId, userId]
+  );
+  return result.rowCount > 0;
+}
 
 function normalizeProfilesRows(rows) {
   if (!Array.isArray(rows)) return rows;
@@ -148,6 +262,54 @@ app.get('/api/meetings', async (_req, res) => {
   }
 });
 
+app.get('/api/feed/meetings', async (_req, res) => {
+  try {
+    const profileColumns = await getTableColumns('profiles');
+    const creatorJsonFields = [
+      'id',
+      'username',
+      'full_name',
+      'email',
+      'age',
+      'location',
+      'city',
+      'about',
+      'bio',
+      'description',
+      'photo_url'
+    ].filter(column => profileColumns.has(column));
+    const creatorJsonSql = creatorJsonFields.length > 0
+      ? `jsonb_build_object(${creatorJsonFields.map(column => `'${column}', p."${column}"`).join(', ')}) AS creator_profile`
+      : `NULL::jsonb AS creator_profile`;
+
+    const result = await query(
+      `SELECT
+         m.*,
+         ${creatorJsonSql}
+       FROM meetings m
+       LEFT JOIN profiles p ON p.id = m.creator_id
+       ORDER BY m.created_at DESC`
+    );
+
+    const rows = (result.rows || []).map(row => {
+      const rawCreator = row.creator_profile && typeof row.creator_profile === 'object'
+        ? row.creator_profile
+        : null;
+      const creator = rawCreator
+        ? normalizeProfilesRows([rawCreator])[0]
+        : null;
+      return {
+        ...row,
+        creator
+      };
+    });
+
+    return res.json(rows);
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to build meetings feed' });
+  }
+});
+
 app.get('/api/profiles/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -156,6 +318,222 @@ app.get('/api/profiles/:userId', async (req, res) => {
     return res.json(normalized[0] || null);
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed' });
+  }
+});
+
+app.get('/api/chats/summary', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const hasStatus = await tableHasColumn('chat_members', 'status');
+    const membershipWhere = hasStatus ? ` AND cm.status = 'approved'` : '';
+    const peerWhere = hasStatus ? ` AND peer_cm.status = 'approved'` : '';
+    const profileColumns = await getTableColumns('profiles');
+    const peerJsonFields = [
+      'id',
+      'username',
+      'full_name',
+      'age',
+      'location',
+      'city',
+      'about',
+      'bio',
+      'description',
+      'photo_url'
+    ].filter(column => profileColumns.has(column));
+    const peerJsonSql = peerJsonFields.length > 0
+      ? `jsonb_build_object(${peerJsonFields.map(column => `'${column}', peer."${column}"`).join(', ')}) AS peer_profile`
+      : `NULL::jsonb AS peer_profile`;
+
+    const summarySql = `
+      WITH my_memberships AS (
+        SELECT DISTINCT cm.chat_id
+          FROM chat_members cm
+         WHERE cm.user_id = $1${membershipWhere}
+      ),
+      visible_chats AS (
+        SELECT c.*
+          FROM chats c
+         WHERE c.id IN (SELECT chat_id FROM my_memberships)
+            OR c.owner_id = $1
+      ),
+      last_messages AS (
+        SELECT DISTINCT ON (m.chat_id)
+               m.chat_id,
+               m.id,
+               m.user_id,
+               m.content,
+               m.created_at
+          FROM chat_messages m
+          JOIN visible_chats vc ON vc.id = m.chat_id
+         ORDER BY m.chat_id, m.created_at DESC, m.id DESC
+      ),
+      direct_peers AS (
+        SELECT DISTINCT ON (peer_cm.chat_id)
+               peer_cm.chat_id,
+               peer_cm.user_id AS peer_id
+          FROM chat_members peer_cm
+          JOIN visible_chats vc ON vc.id = peer_cm.chat_id
+         WHERE peer_cm.user_id <> $1${peerWhere}
+         ORDER BY peer_cm.chat_id, peer_cm.user_id
+      )
+      SELECT
+        vc.*,
+        lm.id AS last_message_id,
+        lm.user_id AS last_message_user_id,
+        lm.content AS last_message_content,
+        lm.created_at AS last_message_created_at,
+        COALESCE(lm.created_at, vc.created_at) AS last_activity_at,
+        ${peerJsonSql}
+      FROM visible_chats vc
+      LEFT JOIN last_messages lm ON lm.chat_id = vc.id
+      LEFT JOIN direct_peers dp ON dp.chat_id = vc.id
+      LEFT JOIN profiles peer ON peer.id = dp.peer_id
+      ORDER BY COALESCE(lm.created_at, vc.created_at) DESC, vc.created_at DESC
+    `;
+
+    const result = await query(summarySql, [userId]);
+    const rows = (result.rows || []).map(row => {
+      const rawPeerProfile = row.peer_profile && typeof row.peer_profile === 'object'
+        ? row.peer_profile
+        : null;
+      const peerProfile = rawPeerProfile
+        ? normalizeProfilesRows([rawPeerProfile])[0]
+        : null;
+
+      const summary = {
+        ...row,
+        __lastActivityAt: row.last_activity_at || row.created_at || null,
+        __lastMessage: row.last_message_id ? {
+          id: row.last_message_id,
+          user_id: row.last_message_user_id,
+          content: row.last_message_content,
+          created_at: row.last_message_created_at
+        } : null,
+        __peerProfile: peerProfile,
+        __displayTitle: row.meeting_id
+          ? (row.title || 'Чат встречи')
+          : (peerProfile?.full_name || peerProfile?.username || row.title || 'Личный чат')
+      };
+
+      delete summary.last_message_id;
+      delete summary.last_message_user_id;
+      delete summary.last_message_content;
+      delete summary.last_message_created_at;
+      delete summary.last_activity_at;
+      delete summary.peer_profile;
+
+      return summary;
+    });
+
+    return res.json({ chats: rows });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to build chats summary' });
+  }
+});
+
+app.get('/api/events/stream', requireAuth, async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  addEventClient(req.user.id, res);
+  res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch (_e) {
+      clearInterval(keepAlive);
+      removeEventClient(req.user.id, res);
+    }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    removeEventClient(req.user.id, res);
+  });
+});
+
+app.post('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
+  try {
+    const chatId = String(req.params.chatId || '');
+    const content = String(req.body?.content || '').trim();
+    const actorId = req.body?.actor_id ? String(req.body.actor_id) : null;
+    if (!chatId || !content) {
+      return res.status(400).json({ error: 'Missing chat_id or content' });
+    }
+
+    const allowed = await ensureChatAccess(chatId, req.user.id);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const rows = await insertRow('chat_messages', {
+      chat_id: chatId,
+      user_id: actorId || req.user.id,
+      content
+    });
+    const message = rows[0] || null;
+    if (message) {
+      await broadcastToChat(chatId, 'chat_message', {
+        chat_id: chatId,
+        message
+      });
+    }
+    return res.json(message);
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Failed to send message' });
+  }
+});
+
+app.post('/api/chats/unread-summary', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const lastReadMap = req.body && typeof req.body.lastReadMap === 'object' && req.body.lastReadMap
+      ? req.body.lastReadMap
+      : {};
+
+    const hasStatus = await tableHasColumn('chat_members', 'status');
+    const membershipWhere = hasStatus ? ` AND status = 'approved'` : '';
+    const membershipsResult = await query(
+      `SELECT DISTINCT chat_id
+         FROM chat_members
+        WHERE user_id = $1${membershipWhere}`,
+      [userId]
+    );
+    const chatIds = Array.from(new Set((membershipsResult.rows || []).map(row => row.chat_id).filter(Boolean)));
+
+    if (chatIds.length === 0) {
+      return res.json({ total: 0, counts: {} });
+    }
+
+    const params = [userId, chatIds];
+    const messagesResult = await query(
+      `SELECT chat_id, created_at
+         FROM chat_messages
+        WHERE chat_id = ANY($2::uuid[])
+          AND user_id <> $1`,
+      params
+    );
+
+    const counts = {};
+    for (const chatId of chatIds) {
+      counts[chatId] = 0;
+    }
+
+    for (const row of messagesResult.rows || []) {
+      const chatId = row.chat_id;
+      const lastRead = lastReadMap[chatId];
+      if (!lastRead || new Date(row.created_at).getTime() > new Date(lastRead).getTime()) {
+        counts[chatId] = (counts[chatId] || 0) + 1;
+      }
+    }
+
+    const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+    return res.json({ total, counts });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to build unread summary' });
   }
 });
 
@@ -231,9 +609,11 @@ app.post('/api/typing', requireAuth, async (req, res) => {
   const perChat = typingState.get(chatId);
   if (is_typing === false) {
     perChat.delete(userId);
+    await broadcastToChat(chatId, 'typing', { chat_id: chatId, user_id: userId, is_typing: false });
     return res.json({ ok: true });
   }
   perChat.set(userId, Date.now() + TYPING_TTL_MS);
+  await broadcastToChat(chatId, 'typing', { chat_id: chatId, user_id: userId, is_typing: true });
   return res.json({ ok: true });
 });
 
