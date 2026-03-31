@@ -816,8 +816,11 @@ function setupEditFormSubmit() {
     const file = fileInput && fileInput.files && fileInput.files[0];
     if (file) {
       try {
+        const compressedFile = typeof window.compressImageFile === 'function'
+          ? await window.compressImageFile(file, { maxWidth: 1200, maxHeight: 1200, maxBytes: 900 * 1024, quality: 0.8 })
+          : file;
         const fd = new FormData();
-        fd.append('file', file);
+        fd.append('file', compressedFile);
         const resp = await fetch('/api/upload/avatar', { method: 'POST', body: fd });
         if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
         const json = await resp.json();

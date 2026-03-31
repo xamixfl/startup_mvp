@@ -30,7 +30,6 @@ const renderedMessageKeysByChat = new Map();
 const loadedMessagesByChat = new Map();
 const hasOlderMessagesByChat = new Map();
 const loadingOlderMessagesByChat = new Map();
-const profileCache = new Map();
 
 function isModerationChat(chat) {
   return Boolean(chat && !chat.meeting_id && LEGACY_ADMIN_CHAT_TITLES.has(String(chat.title || '').trim()));
@@ -308,7 +307,7 @@ function startChatListPolling() {
   chatListPollTimer = setInterval(async () => {
     if (!currentUser) return;
     await loadChats(true);
-  }, 15000);
+  }, 30000);
 }
 
 function stopChatListPolling() {
@@ -321,7 +320,7 @@ function startMessagePolling(chatId) {
   messagePollTimer = setInterval(async () => {
     if (!currentChat || currentChat.id !== chatId) return;
     await pollNewMessages(chatId);
-  }, 2000);
+  }, 3000);
 }
 
 function stopMessagePolling() {
@@ -334,7 +333,7 @@ function startTypingPolling(chatId) {
   typingPollTimer = setInterval(async () => {
     if (!currentChat || currentChat.id !== chatId) return;
     await refreshTypingIndicator(chatId);
-  }, 2000);
+  }, 3000);
 }
 
 function stopTypingPolling() {
@@ -1214,8 +1213,11 @@ async function uploadAndSendImage(file) {
   if (!currentChat) return;
 
   try {
+    const compressedFile = typeof window.compressImageFile === 'function'
+      ? await window.compressImageFile(file, { maxWidth: 1600, maxHeight: 1600, maxBytes: 1.1 * 1024 * 1024, quality: 0.8 })
+      : file;
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', compressedFile);
     const resp = await fetch('/api/upload/chat-image', { method: 'POST', body: fd });
     if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
     const json = await resp.json();

@@ -822,7 +822,7 @@ async function updateChatBadge() {
 function startChatBadgePolling() {
   updateChatBadge();
   if (chatBadgeInterval) clearInterval(chatBadgeInterval);
-  chatBadgeInterval = setInterval(updateChatBadge, 30000);
+  chatBadgeInterval = setInterval(updateChatBadge, 45000);
 }
 
 function stopChatBadgePolling() {
@@ -839,15 +839,9 @@ async function updateMyEventsBadge() {
   if (!badge || !currentUser) return;
 
   try {
-    const rows = await api.get(TABLES.notifications, {
-      admin_profile_id: currentUser.id,
-      $order: { column: 'created_at', ascending: false },
-      $limit: 50
-    });
-    const total = (rows || []).filter(item =>
-      PARTICIPATION_NOTIFICATION_TYPES.includes(item.notification_type) &&
-      item.is_read !== true
-    ).length;
+    const summary = await api.request('/api/my-events/notifications?limit=20');
+    const rows = Array.isArray(summary?.notifications) ? summary.notifications : [];
+    const total = rows.filter(item => item.is_read !== true).length;
     if (total > 0) {
       badge.textContent = total > 99 ? '99+' : String(total);
       badge.style.display = 'flex';
@@ -862,7 +856,7 @@ async function updateMyEventsBadge() {
 function startMyEventsBadgePolling() {
   updateMyEventsBadge();
   if (myEventsBadgeInterval) clearInterval(myEventsBadgeInterval);
-  myEventsBadgeInterval = setInterval(updateMyEventsBadge, 30000);
+  myEventsBadgeInterval = setInterval(updateMyEventsBadge, 45000);
 }
 
 function stopMyEventsBadgePolling() {
@@ -876,7 +870,9 @@ function stopMyEventsBadgePolling() {
 
 async function checkIfBlockedByUser(otherUserId) {
   try {
-    const profile = await api.getOne(TABLES.profiles, otherUserId);
+    const profile = typeof window.getProfileCached === 'function'
+      ? await window.getProfileCached(otherUserId)
+      : await api.getOne(TABLES.profiles, otherUserId);
     const blockedUsers = Array.isArray(profile?.blocked_users) ? profile.blocked_users : [];
     return currentUser?.id ? blockedUsers.includes(currentUser.id) : false;
   } catch (e) {
@@ -887,7 +883,9 @@ async function checkIfBlockedByUser(otherUserId) {
 async function hasCurrentUserBlocked(otherUserId) {
   if (!currentUser?.id) return false;
   try {
-    const profile = await api.getOne(TABLES.profiles, currentUser.id);
+    const profile = typeof window.getProfileCached === 'function'
+      ? await window.getProfileCached(currentUser.id)
+      : await api.getOne(TABLES.profiles, currentUser.id);
     const blockedUsers = Array.isArray(profile?.blocked_users) ? profile.blocked_users : [];
     return blockedUsers.includes(otherUserId);
   } catch (e) {

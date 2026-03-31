@@ -96,6 +96,33 @@ async function buildProfileJsonObjectSql(alias) {
   return `jsonb_build_object(${fields.map(column => `'${column}', ${alias}."${column}"`).join(', ')})`;
 }
 
+function getProfileDisplayNameServer(profile, fallback = 'Пользователь') {
+  return profile?.full_name || profile?.username || profile?.email || fallback;
+}
+
+function parseJoinRequesterNameServer(message) {
+  const text = String(message || '');
+  const marker = ' хочет присоединиться';
+  const index = text.indexOf(marker);
+  if (index <= 0) return '';
+  return text.slice(0, index).trim();
+}
+
+function normalizeNotificationNameServer(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function resolveNotificationRequestServer(notification, pendingRequests) {
+  if (!Array.isArray(pendingRequests) || pendingRequests.length === 0) return null;
+  if (pendingRequests.length === 1) return pendingRequests[0];
+
+  const senderName = normalizeNotificationNameServer(parseJoinRequesterNameServer(notification.message));
+  if (!senderName) return null;
+
+  const matches = pendingRequests.filter(request => normalizeNotificationNameServer(request.displayName) === senderName);
+  return matches.length === 1 ? matches[0] : null;
+}
+
 function addEventClient(userId, res) {
   const key = String(userId);
   if (!eventClients.has(key)) {
@@ -360,23 +387,7 @@ app.delete('/api/meetings/:meetingId/cascade', requireAuth, async (req, res) => 
 
 app.get('/api/feed/meetings', async (_req, res) => {
   try {
-    const profileColumns = await getTableColumns('profiles');
-    const creatorJsonFields = [
-      'id',
-      'username',
-      'full_name',
-      'email',
-      'age',
-      'location',
-      'city',
-      'about',
-      'bio',
-      'description',
-      'photo_url'
-    ].filter(column => profileColumns.has(column));
-    const creatorJsonSql = creatorJsonFields.length > 0
-      ? `jsonb_build_object(${creatorJsonFields.map(column => `'${column}', p."${column}"`).join(', ')}) AS creator_profile`
-      : `NULL::jsonb AS creator_profile`;
+    const creatorJsonSql = `${await buildProfileJsonObjectSql('p')} AS creator_profile`;
 
     const result = await query(
       `SELECT
@@ -403,6 +414,60 @@ app.get('/api/feed/meetings', async (_req, res) => {
     return res.json(rows);
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed to build meetings feed' });
+  }
+});
+
+app.get('/api/my-events/summary', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const hasStatus = await tableHasColumn('chat_members', 'status');
+    const approvedWhere = hasStatus ? ` AND cm.status = 'approved'` : '';
+    const creatorJsonSql = `${await buildProfileJsonObjectSql('p')} AS creator_profile`;
+
+    const result = await query(
+      `WITH owned AS (
+         SELECT m.*, 'owner'::text AS role
+           FROM meetings m
+          WHERE m.creator_id = $1
+       ),
+       participant_ids AS (
+         SELECT DISTINCT tc.meeting_id
+           FROM "table-connector" tc
+          WHERE tc.user_id = $1
+         UNION
+         SELECT DISTINCT c.meeting_id
+           FROM chat_members cm
+           JOIN chats c ON c.id = cm.chat_id
+          WHERE cm.user_id = $1${approvedWhere}
+            AND c.meeting_id IS NOT NULL
+       ),
+       participant_meetings AS (
+         SELECT m.*, CASE WHEN m.creator_id = $1 THEN 'owner' ELSE 'participant' END::text AS role
+           FROM meetings m
+          WHERE m.id IN (SELECT meeting_id FROM participant_ids)
+       ),
+       merged AS (
+         SELECT * FROM owned
+         UNION
+         SELECT * FROM participant_meetings
+       )
+       SELECT merged.*, ${creatorJsonSql}
+         FROM merged
+         LEFT JOIN profiles p ON p.id = merged.creator_id
+        ORDER BY COALESCE(merged.created_at, merged.updated_at, now()) DESC`,
+      [userId]
+    );
+
+    const rows = (result.rows || []).map(row => {
+      const creator = row.creator_profile ? normalizeProfilesRows([row.creator_profile])[0] : null;
+      const item = { ...row, creator };
+      delete item.creator_profile;
+      return item;
+    });
+
+    return res.json({ meetings: rows });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to build my-events summary' });
   }
 });
 
@@ -697,6 +762,87 @@ app.post('/api/chats/unread-summary', requireAuth, async (req, res) => {
     return res.json({ total, counts });
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed to build unread summary' });
+  }
+});
+
+app.get('/api/my-events/notifications', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const limitRaw = Number(req.query.limit || 20);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.floor(limitRaw), 1), 100) : 20;
+    const types = ['event_join_request', 'event_join_approved', 'event_join_rejected', 'event_joined_direct'];
+
+    const notificationsRows = await selectRows('notifications', {
+      admin_profile_id: userId,
+      notification_type: { in: types },
+      $order: { column: 'created_at', ascending: false },
+      $limit: limit
+    });
+
+    const meetingIds = Array.from(new Set(
+      (notificationsRows || [])
+        .filter(item => item.related_table === 'meetings' && item.related_id)
+        .map(item => item.related_id)
+    ));
+
+    const meetingRows = meetingIds.length > 0
+      ? await selectRows('meetings', { id: { in: meetingIds } })
+      : [];
+    const meetingsById = new Map((meetingRows || []).map(meeting => [meeting.id, meeting]));
+
+    const requestMeetings = (notificationsRows || [])
+      .filter(item => item.notification_type === 'event_join_request')
+      .map(item => meetingsById.get(item.related_id))
+      .filter(meeting => meeting?.id && meeting?.chat_id);
+
+    const requestMeetingIds = new Set(requestMeetings.map(meeting => meeting.id));
+    const requestChatIds = Array.from(new Set(requestMeetings.map(meeting => meeting.chat_id)));
+    let pendingByMeetingId = new Map();
+
+    if (requestChatIds.length > 0) {
+      const pendingRows = await selectRows('chat_members', {
+        chat_id: { in: requestChatIds },
+        status: 'pending'
+      });
+      const profileIds = Array.from(new Set((pendingRows || []).map(row => row.user_id).filter(Boolean)));
+      const profiles = profileIds.length > 0 ? await selectRows('profiles', { id: { in: profileIds } }) : [];
+      const profilesById = new Map(normalizeProfilesRows(profiles || []).map(profile => [profile.id, profile]));
+      const meetingIdByChatId = new Map(requestMeetings.map(meeting => [meeting.chat_id, meeting.id]));
+
+      pendingByMeetingId = new Map(Array.from(requestMeetingIds).map(meetingId => [meetingId, []]));
+      (pendingRows || []).forEach(row => {
+        const meetingId = meetingIdByChatId.get(row.chat_id);
+        if (!meetingId) return;
+        const profile = profilesById.get(row.user_id) || null;
+        const pending = pendingByMeetingId.get(meetingId) || [];
+        pending.push({
+          membershipId: row.id,
+          userId: row.user_id,
+          createdAt: row.created_at || null,
+          profile,
+          displayName: getProfileDisplayNameServer(profile, row.user_id)
+        });
+        pendingByMeetingId.set(meetingId, pending);
+      });
+    }
+
+    const notifications = (notificationsRows || []).map(notification => {
+      const meeting = meetingsById.get(notification.related_id) || null;
+      const pendingRequests = meeting?.id ? (pendingByMeetingId.get(meeting.id) || []) : [];
+      const resolvedRequest = notification.notification_type === 'event_join_request'
+        ? resolveNotificationRequestServer(notification, pendingRequests)
+        : null;
+      return {
+        ...notification,
+        meeting,
+        pendingRequests,
+        resolvedRequest
+      };
+    });
+
+    return res.json({ notifications });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to build notifications summary' });
   }
 });
 

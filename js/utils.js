@@ -1,20 +1,86 @@
-﻿async function fetchTopics() {
+﻿let topicsCache = null;
+let topicsPromise = null;
+let currentUserCache = undefined;
+let currentUserPromise = null;
+const profileCache = new Map();
+
+async function fetchTopics(options = {}) {
   const { TABLES } = window.APP || {};
+  if (!options.force && Array.isArray(topicsCache)) return topicsCache;
+  if (!options.force && topicsPromise) return topicsPromise;
+
+  topicsPromise = (async () => {
+    try {
+      const rows = await api.get(TABLES.topics, { $order: { column: 'sort_order', ascending: true } });
+      topicsCache = sortTopicsForDisplay(rows || []);
+      return topicsCache;
+    } catch (error) {
+      console.error('Error fetching topics:', error);
+      return [];
+    } finally {
+      topicsPromise = null;
+    }
+  })();
+
+  return topicsPromise;
+}
+
+function normalizeProfileRecord(profile) {
+  if (!profile || typeof profile !== 'object') return profile;
+  const normalized = { ...profile };
+  if (normalized.photo_url && !normalized.photo_URL) normalized.photo_URL = normalized.photo_url;
+  if (normalized.city && !normalized.location) normalized.location = normalized.city;
+  if (!normalized.about) normalized.about = normalized.bio || normalized.description || '';
+  return normalized;
+}
+
+function primeProfileCache(profile) {
+  const normalized = normalizeProfileRecord(profile);
+  if (!normalized?.id) return normalized;
+  profileCache.set(String(normalized.id), normalized);
+  return normalized;
+}
+
+async function getCurrentUser(options = {}) {
+  if (!options.force && currentUserCache !== undefined) return currentUserCache;
+  if (!options.force && currentUserPromise) return currentUserPromise;
+
+  currentUserPromise = (async () => {
+    try {
+      currentUserCache = await api.request('/api/auth/me');
+      if (currentUserCache?.id) primeProfileCache(currentUserCache);
+      return currentUserCache;
+    } catch (_error) {
+      currentUserCache = null;
+      return null;
+    } finally {
+      currentUserPromise = null;
+    }
+  })();
+
+  return currentUserPromise;
+}
+
+async function getProfileCached(userId, options = {}) {
+  const key = String(userId || '').trim();
+  if (!key) return null;
+  if (!options.force && profileCache.has(key)) return profileCache.get(key);
+
   try {
-    const rows = await api.get(TABLES.topics, { $order: { column: 'sort_order', ascending: true } });
-    return sortTopicsForDisplay(rows || []);
+    const profile = await api.request(`/api/profiles/${encodeURIComponent(key)}`);
+    return primeProfileCache(profile);
   } catch (error) {
-    console.error('Error fetching topics:', error);
-    return [];
+    console.error('Error loading profile:', key, error);
+    return null;
   }
 }
 
-async function getCurrentUser() {
-  try {
-    return await api.request('/api/auth/me');
-  } catch (error) {
-    return null;
-  }
+function clearAppCaches() {
+  topicsCache = null;
+  topicsPromise = null;
+  currentUserCache = undefined;
+  currentUserPromise = null;
+  profileCache.clear();
 }
 
 async function cleanupExpiredMeetings() {
@@ -60,7 +126,7 @@ function formatMeetingCountdown(isoString) {
 function buildMeetingCountdownLabel(expiresAt) {
   const raw = formatMeetingCountdown(expiresAt);
   if (!raw) return '';
-  return `\u23f1 ${raw}`;
+  return `⏱ ${raw}`;
 }
 
 function stripTopicEmoji(value) {
@@ -198,8 +264,65 @@ async function postChatSystemMessage(chatId, message, actorId) {
   }
 }
 
+function loadImageFromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Не удалось прочитать изображение'));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function compressImageFile(file, options = {}) {
+  if (!(file instanceof File) || !String(file.type || '').startsWith('image/')) return file;
+
+  const maxWidth = Number(options.maxWidth || 1600);
+  const maxHeight = Number(options.maxHeight || 1600);
+  const quality = Number(options.quality || 0.82);
+  const maxBytes = Number(options.maxBytes || 1.2 * 1024 * 1024);
+
+  if (file.size <= maxBytes && !options.force) return file;
+
+  try {
+    const image = await loadImageFromBlob(file);
+    const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height);
+    const targetWidth = Math.max(1, Math.round(image.width * scale));
+    const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+
+    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+    const outputType = file.type === 'image/png' ? 'image/webp' : (file.type || 'image/jpeg');
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, outputType, quality));
+    if (!blob || blob.size <= 0 || blob.size >= file.size) return file;
+
+    const extension = outputType === 'image/webp' ? 'webp' : outputType === 'image/png' ? 'png' : 'jpg';
+    return new File([blob], file.name.replace(/\.[^.]+$/, `.${extension}`), {
+      type: outputType,
+      lastModified: Date.now()
+    });
+  } catch (error) {
+    console.warn('compressImageFile failed:', error);
+    return file;
+  }
+}
+
 window.fetchTopics = fetchTopics;
 window.getCurrentUser = getCurrentUser;
+window.getProfileCached = getProfileCached;
+window.primeProfileCache = primeProfileCache;
+window.clearAppCaches = clearAppCaches;
 window.cleanupExpiredMeetings = cleanupExpiredMeetings;
 window.deleteExpiredMeeting = deleteExpiredMeeting;
 window.createUserNotification = createUserNotification;
@@ -210,3 +333,4 @@ window.getTopicIcon = getTopicIcon;
 window.getTopicDisplayName = getTopicDisplayName;
 window.groupTopicsForDisplay = groupTopicsForDisplay;
 window.getSelectableTopics = getSelectableTopics;
+window.compressImageFile = compressImageFile;

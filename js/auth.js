@@ -347,8 +347,11 @@ async function validateStep3() {
     // Upload avatar (optional)
     let photoUrl = 'user';
     if (avatarFile) {
+      const compressedAvatar = typeof window.compressImageFile === 'function'
+        ? await window.compressImageFile(avatarFile, { maxWidth: 1200, maxHeight: 1200, maxBytes: 900 * 1024, quality: 0.8 })
+        : avatarFile;
       const form = new FormData();
-      form.append('file', avatarFile);
+      form.append('file', compressedAvatar);
       const payload = await fetch('/api/upload/avatar', { method: 'POST', body: form })
         .then(async r => {
           const p = await r.json().catch(() => ({}));
