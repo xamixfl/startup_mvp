@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
@@ -27,6 +28,7 @@ const bcrypt = require('bcryptjs');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+app.set('trust proxy', 1);
 
 // Minimal in-memory typing state: { chatId -> { userId -> expiresAtMs } }
 const typingState = new Map();
@@ -34,6 +36,104 @@ const TYPING_TTL_MS = 3500;
 const schemaColumnCache = new Map();
 const eventClients = new Map();
 const EXPIRED_MEETINGS_CLEANUP_INTERVAL_MS = 60 * 1000;
+const loginRateLimitState = new Map();
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const CSRF_COOKIE_NAME = process.env.CSRF_COOKIE_NAME || 'csrf_token';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+
+function shouldUseSecureCookies() {
+  const raw = process.env.COOKIE_SECURE;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return process.env.NODE_ENV === 'production';
+}
+
+function generateCsrfToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function setCsrfCookie(res, token) {
+  res.cookie(CSRF_COOKIE_NAME, token, {
+    httpOnly: false,
+    sameSite: 'lax',
+    secure: shouldUseSecureCookies(),
+    path: '/'
+  });
+}
+
+function ensureCsrfToken(req, res, next) {
+  const existingToken = req.cookies && req.cookies[CSRF_COOKIE_NAME];
+  if (existingToken) {
+    req.csrfToken = existingToken;
+    return next();
+  }
+
+  const token = generateCsrfToken();
+  req.csrfToken = token;
+  setCsrfCookie(res, token);
+  return next();
+}
+
+function csrfProtection(req, res, next) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
+
+  const cookieToken = req.cookies && req.cookies[CSRF_COOKIE_NAME];
+  const headerToken = req.get(CSRF_HEADER_NAME);
+  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+    return res.status(403).json({ error: 'CSRF token invalid or missing' });
+  }
+  return next();
+}
+
+function getLoginRateLimitKey(req) {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown');
+  return `${ip}:${email || 'unknown'}`;
+}
+
+function pruneExpiredLoginRateLimitEntries(now = Date.now()) {
+  for (const [key, value] of loginRateLimitState.entries()) {
+    if (!value || value.resetAt <= now) {
+      loginRateLimitState.delete(key);
+    }
+  }
+}
+
+function enforceLoginRateLimit(req, res, next) {
+  pruneExpiredLoginRateLimitEntries();
+  const key = getLoginRateLimitKey(req);
+  const now = Date.now();
+  const bucket = loginRateLimitState.get(key);
+  if (bucket && bucket.count >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS && bucket.resetAt > now) {
+    const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    res.set('Retry-After', String(retryAfterSec));
+    return res.status(429).json({
+      error: 'Слишком много попыток входа. Попробуйте позже.',
+      retry_after_seconds: retryAfterSec
+    });
+  }
+  req.loginRateLimitKey = key;
+  return next();
+}
+
+function registerFailedLoginAttempt(key) {
+  if (!key) return;
+  const now = Date.now();
+  const bucket = loginRateLimitState.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    loginRateLimitState.set(key, { count: 1, resetAt: now + LOGIN_RATE_LIMIT_WINDOW_MS });
+    return;
+  }
+  bucket.count += 1;
+}
+
+function clearLoginRateLimit(key) {
+  if (!key) return;
+  loginRateLimitState.delete(key);
+}
 
 async function tableHasColumn(tableName, columnName) {
   const cacheKey = `${tableName}:${columnName}`;
@@ -270,6 +370,15 @@ function normalizeQueryPayload(table, data) {
 
 app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
+app.use(ensureCsrfToken);
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'same-origin');
+  if (process.env.NODE_ENV === 'production') {
+    res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 
 // Serve uploads and frontend from the project root so js/api.js can call `/api/*` same-origin.
 // Note: `express.static` returns 404 for directory requests like `/uploads/` (no index, no listing).
@@ -280,9 +389,14 @@ app.use(express.static(path.resolve(__dirname, '..', '..')));
 
 // Only API routes need auth/session lookup. Static assets/pages must not depend on DB.
 app.use('/api', authMiddleware);
+app.use('/api', csrfProtection);
 
 app.get('/api/health', async (_req, res) => {
   return res.json({ ok: true });
+});
+
+app.get('/api/csrf-token', (req, res) => {
+  return res.json({ csrfToken: req.csrfToken || null });
 });
 
 // DB connectivity check (useful when debugging "topics not loading").
@@ -869,14 +983,21 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', enforceLoginRateLimit, async (req, res) => {
   try {
     const { email, password } = req.body || {};
     const profile = await findProfileByEmail(email);
-    if (!profile) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!profile) {
+      registerFailedLoginAttempt(req.loginRateLimitKey);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
     const ok = await bcrypt.compare(String(password || ''), profile.password_hash || '');
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!ok) {
+      registerFailedLoginAttempt(req.loginRateLimitKey);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
     const session = await createSession(profile.id);
+    clearLoginRateLimit(req.loginRateLimitKey);
     setSessionCookie(res, session);
     // req.user will be set on next request; return sanitized profile now
     const { password_hash, ...safe } = profile;
@@ -943,18 +1064,24 @@ app.get('/api/typing', requireAuth, async (req, res) => {
 });
 
 // Upload endpoints (multipart/form-data)
-app.post('/api/upload/avatar', uploader('avatars').single('file'), async (req, res) => {
+app.post('/api/upload/avatar', requireAuth, uploader('avatars').single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Missing file' });
   return res.json({ url: `/uploads/avatars/${req.file.filename}` });
 });
 
-app.post('/api/upload/chat-image', uploader('chat').single('file'), async (req, res) => {
+app.post('/api/upload/chat-image', requireAuth, uploader('chat').single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Missing file' });
   return res.json({ url: `/uploads/chat/${req.file.filename}` });
 });
 
 // JSON errors for API
 app.use('/api', (err, _req, res, _next) => {
+  if (err?.name === 'MulterError' && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'Файл слишком большой' });
+  }
+  if (err?.statusCode) {
+    return res.status(err.statusCode).json({ error: err.message || 'Request failed' });
+  }
   return res.status(500).json({ error: err && err.message ? err.message : 'Server error' });
 });
 

@@ -821,7 +821,12 @@ function setupEditFormSubmit() {
           : file;
         const fd = new FormData();
         fd.append('file', compressedFile);
-        const resp = await fetch('/api/upload/avatar', { method: 'POST', body: fd });
+      const resp = await fetch('/api/upload/avatar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: typeof api?.buildHeaders === 'function' ? api.buildHeaders({ method: 'POST', body: fd }) : {},
+        body: fd
+      });
         if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
         const json = await resp.json();
         photo_URL = json && json.url ? json.url : photo_URL;

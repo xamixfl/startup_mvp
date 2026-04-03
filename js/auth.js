@@ -336,7 +336,10 @@ async function validateStep3() {
     // Signup (creates session cookie)
     await fetch('/api/auth/signup', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      headers: typeof api?.buildHeaders === 'function'
+        ? api.buildHeaders({ method: 'POST', body: JSON.stringify({ email, password, username, full_name: fullName }) })
+        : { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, username, full_name: fullName })
     }).then(async r => {
       const payload = await r.json().catch(() => ({}));
@@ -352,7 +355,12 @@ async function validateStep3() {
         : avatarFile;
       const form = new FormData();
       form.append('file', compressedAvatar);
-      const payload = await fetch('/api/upload/avatar', { method: 'POST', body: form })
+      const payload = await fetch('/api/upload/avatar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: typeof api?.buildHeaders === 'function' ? api.buildHeaders({ method: 'POST', body: form }) : {},
+        body: form
+      })
         .then(async r => {
           const p = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(p?.error || `Upload error: ${r.status}`);
@@ -364,7 +372,21 @@ async function validateStep3() {
     // Complete profile
     await fetch('/api/users/profile', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      headers: typeof api?.buildHeaders === 'function'
+        ? api.buildHeaders({ method: 'PUT', body: JSON.stringify({
+          username,
+          full_name: fullName,
+          age: String(age),
+          sex: gender,
+          location: city,
+          photo_URL: photoUrl,
+          interests: selectedCategories,
+          about,
+          role: 'user',
+          blocked_users: []
+        }) })
+        : { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username,
         full_name: fullName,

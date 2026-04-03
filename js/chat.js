@@ -1218,7 +1218,12 @@ async function uploadAndSendImage(file) {
       : file;
     const fd = new FormData();
     fd.append('file', compressedFile);
-    const resp = await fetch('/api/upload/chat-image', { method: 'POST', body: fd });
+    const resp = await fetch('/api/upload/chat-image', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: typeof api?.buildHeaders === 'function' ? api.buildHeaders({ method: 'POST', body: fd }) : {},
+      body: fd
+    });
     if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
     const json = await resp.json();
     const imageUrl = json && json.url ? json.url : null;
