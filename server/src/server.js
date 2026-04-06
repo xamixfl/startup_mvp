@@ -342,6 +342,9 @@ function normalizeProfilesRows(rows) {
   if (!Array.isArray(rows)) return rows;
   return rows.map(row => {
     if (!row || typeof row !== 'object') return row;
+    if ('password_hash' in row) {
+      delete row.password_hash;
+    }
     if (row.photo_url && !row.photo_URL) {
       row.photo_URL = row.photo_url;
     }
@@ -366,6 +369,363 @@ function normalizeQueryPayload(table, data) {
     return { ...rest, photo_url: photo_URL };
   }
   return data;
+}
+
+function createHttpError(message, status = 400) {
+  const error = new Error(message);
+  error.statusCode = status;
+  return error;
+}
+
+function isAdmin(req) {
+  return req.user?.role === 'admin';
+}
+
+function requireAuthenticatedUser(req) {
+  if (!req.user) throw createHttpError('Unauthorized', 401);
+}
+
+function extractFilterIds(value) {
+  if (!value) return [];
+  if (typeof value === 'string' || typeof value === 'number') {
+    return [String(value)];
+  }
+  if (value && typeof value === 'object' && Array.isArray(value.in)) {
+    return value.in.map(item => String(item)).filter(Boolean);
+  }
+  return [];
+}
+
+async function getMeetingRecord(meetingId) {
+  const rows = await selectRows('meetings', { id: meetingId, $limit: 1 });
+  return (rows || [])[0] || null;
+}
+
+async function getChatRecord(chatId) {
+  const rows = await selectRows('chats', { id: chatId, $limit: 1 });
+  return (rows || [])[0] || null;
+}
+
+async function canManageMeeting(req, meetingId) {
+  if (isAdmin(req)) return true;
+  const meeting = await getMeetingRecord(meetingId);
+  if (!meeting) throw createHttpError('Meeting not found', 404);
+  return String(meeting.creator_id || '') === String(req.user?.id || '');
+}
+
+async function assertChatAccess(req, chatIds) {
+  requireAuthenticatedUser(req);
+  if (!Array.isArray(chatIds) || chatIds.length === 0) {
+    throw createHttpError('Missing chat access filter', 400);
+  }
+  for (const chatId of chatIds) {
+    const hasAccess = await ensureChatAccess(String(chatId), String(req.user.id));
+    if (!hasAccess && !isAdmin(req)) {
+      throw createHttpError('Forbidden', 403);
+    }
+  }
+}
+
+async function canManageChat(req, chatId) {
+  if (isAdmin(req)) return true;
+  const chat = await getChatRecord(chatId);
+  if (!chat) throw createHttpError('Chat not found', 404);
+  if (String(chat.owner_id || '') === String(req.user?.id || '')) {
+    return true;
+  }
+  if (chat.meeting_id) {
+    return canManageMeeting(req, chat.meeting_id);
+  }
+  return false;
+}
+
+async function canDeleteChat(req, chatId) {
+  if (await canManageChat(req, chatId)) return true;
+  const members = await selectRows('chat_members', { chat_id: chatId, $limit: 1 });
+  return !Array.isArray(members) || members.length === 0;
+}
+
+async function authorizeQueryOperation(req, table, action, data, filters) {
+  const normalizedData = normalizeQueryPayload(table, data);
+  const normalizedFilters = filters && typeof filters === 'object' ? { ...filters } : {};
+  const publicReadTables = new Set(['topics', 'meetings', 'profiles', 'table-connector']);
+  const allowedActions = new Set(['select', 'count', 'insert', 'update', 'delete', 'deleteWhere']);
+
+  if (!allowedActions.has(action)) {
+    throw createHttpError('Unknown action', 400);
+  }
+
+  const allowedTables = new Set([
+    'profiles',
+    'meetings',
+    'table-connector',
+    'topics',
+    'chats',
+    'chat_members',
+    'chat_messages',
+    'reports',
+    'bans',
+    'ban_appeals',
+    'notifications'
+  ]);
+
+  if (!allowedTables.has(table)) {
+    throw createHttpError('Forbidden table', 403);
+  }
+
+  if (!['select', 'count'].includes(action)) {
+    requireAuthenticatedUser(req);
+  } else if (!publicReadTables.has(table)) {
+    requireAuthenticatedUser(req);
+  }
+
+  if (table === 'profiles') {
+    if (action === 'insert' || action === 'delete' || action === 'deleteWhere') {
+      throw createHttpError('Forbidden', 403);
+    }
+    if (action === 'update') {
+      const targetId = String(normalizedData?.id || '');
+      if (!targetId) throw createHttpError('Missing id', 400);
+      if (!isAdmin(req) && targetId !== String(req.user.id)) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'meetings') {
+    if (action === 'insert') {
+      return {
+        data: { ...normalizedData, creator_id: req.user.id },
+        filters: normalizedFilters
+      };
+    }
+    if (action === 'update' || action === 'delete') {
+      const meetingId = String(normalizedData?.id || '');
+      if (!meetingId) throw createHttpError('Missing id', 400);
+      const canManage = await canManageMeeting(req, meetingId);
+      if (!canManage) throw createHttpError('Forbidden', 403);
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'table-connector') {
+    if (action === 'select' || action === 'count') {
+      const hasMeetingFilter = Boolean(normalizedFilters?.meeting_id);
+      const hasUserFilter = Boolean(normalizedFilters?.user_id);
+      if (!isAdmin(req) && !hasMeetingFilter && !hasUserFilter) {
+        throw createHttpError('Forbidden', 403);
+      }
+      return { data: normalizedData, filters: normalizedFilters };
+    }
+    if (action === 'insert') {
+      const meetingId = String(normalizedData?.meeting_id || '');
+      const userId = String(normalizedData?.user_id || req.user.id);
+      if (!meetingId) throw createHttpError('Missing meeting_id', 400);
+      if (!isAdmin(req) && userId !== String(req.user.id) && !(await canManageMeeting(req, meetingId))) {
+        throw createHttpError('Forbidden', 403);
+      }
+      return { data: { ...normalizedData, user_id: userId }, filters: normalizedFilters };
+    }
+    if (action === 'delete') {
+      const rowId = String(normalizedData?.id || '');
+      if (!rowId) throw createHttpError('Missing id', 400);
+      const rows = await selectRows('table-connector', { id: rowId, $limit: 1 });
+      const row = (rows || [])[0];
+      if (!row) throw createHttpError('Not found', 404);
+      if (!isAdmin(req) && String(row.user_id || '') !== String(req.user.id) && !(await canManageMeeting(req, row.meeting_id))) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    if (action === 'deleteWhere') {
+      const meetingId = String(normalizedFilters?.meeting_id || '');
+      const userId = String(normalizedFilters?.user_id || '');
+      if (!meetingId) throw createHttpError('Missing meeting_id', 400);
+      if (!isAdmin(req) && userId && userId !== String(req.user.id) && !(await canManageMeeting(req, meetingId))) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'chats') {
+    if (action === 'select' || action === 'count') {
+      if (!isAdmin(req)) {
+        const ownerId = normalizedFilters?.owner_id ? String(normalizedFilters.owner_id) : '';
+        const creatorId = normalizedFilters?.creator_id ? String(normalizedFilters.creator_id) : '';
+        const chatIds = extractFilterIds(normalizedFilters?.id);
+        if (ownerId && ownerId === String(req.user.id)) {
+          return { data: normalizedData, filters: normalizedFilters };
+        }
+        if (creatorId && creatorId === String(req.user.id)) {
+          return { data: normalizedData, filters: normalizedFilters };
+        }
+        if (chatIds.length > 0) {
+          await assertChatAccess(req, chatIds);
+          return { data: normalizedData, filters: normalizedFilters };
+        }
+        throw createHttpError('Forbidden', 403);
+      }
+      return { data: normalizedData, filters: normalizedFilters };
+    }
+    if (action === 'insert') {
+      const meetingId = normalizedData?.meeting_id ? String(normalizedData.meeting_id) : '';
+      if (meetingId && !isAdmin(req) && !(await canManageMeeting(req, meetingId))) {
+        throw createHttpError('Forbidden', 403);
+      }
+      return { data: { ...normalizedData, owner_id: req.user.id }, filters: normalizedFilters };
+    }
+    if (action === 'update') {
+      const chatId = String(normalizedData?.id || '');
+      if (!chatId) throw createHttpError('Missing id', 400);
+      if (!(await canManageChat(req, chatId))) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    if (action === 'delete') {
+      const chatId = String(normalizedData?.id || '');
+      if (!chatId) throw createHttpError('Missing id', 400);
+      if (!(await canDeleteChat(req, chatId))) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'chat_members') {
+    if (action === 'select' || action === 'count') {
+      const directUserId = normalizedFilters?.user_id ? String(normalizedFilters.user_id) : '';
+      const chatIds = extractFilterIds(normalizedFilters?.chat_id);
+      const filterKeys = Object.keys(normalizedFilters || {}).filter(key => !key.startsWith('$'));
+      const schemaProbeOnly = filterKeys.length > 0 && filterKeys.every(key => key === 'status');
+
+      if (schemaProbeOnly) {
+        return { data: normalizedData, filters: normalizedFilters };
+      }
+      if (directUserId && (directUserId === String(req.user.id) || isAdmin(req))) {
+        return { data: normalizedData, filters: normalizedFilters };
+      }
+      await assertChatAccess(req, chatIds);
+      return { data: normalizedData, filters: normalizedFilters };
+    }
+    if (action === 'insert') {
+      const chatId = String(normalizedData?.chat_id || '');
+      const userId = String(normalizedData?.user_id || req.user.id);
+      if (!chatId) throw createHttpError('Missing chat_id', 400);
+      const canAccess = await ensureChatAccess(chatId, String(req.user.id));
+      const canManage = await canManageChat(req, chatId);
+      if (!canAccess && !canManage) throw createHttpError('Forbidden', 403);
+      if (!isAdmin(req) && userId !== String(req.user.id) && !canManage) {
+        throw createHttpError('Forbidden', 403);
+      }
+      return { data: { ...normalizedData, user_id: userId }, filters: normalizedFilters };
+    }
+    if (action === 'update') {
+      const rowId = String(normalizedData?.id || '');
+      if (!rowId) throw createHttpError('Missing id', 400);
+      const rows = await selectRows('chat_members', { id: rowId, $limit: 1 });
+      const row = (rows || [])[0];
+      if (!row) throw createHttpError('Not found', 404);
+      if (!isAdmin(req) && String(row.user_id || '') !== String(req.user.id) && !(await canManageChat(req, row.chat_id))) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    if (action === 'deleteWhere') {
+      const chatId = String(normalizedFilters?.chat_id || '');
+      const userId = normalizedFilters?.user_id ? String(normalizedFilters.user_id) : '';
+      if (!chatId) throw createHttpError('Missing chat_id', 400);
+      if (!isAdmin(req) && userId && userId !== String(req.user.id) && !(await canManageChat(req, chatId))) {
+        throw createHttpError('Forbidden', 403);
+      }
+      if (!isAdmin(req) && !userId && !(await canManageChat(req, chatId))) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'chat_messages') {
+    if (action === 'select' || action === 'count') {
+      const chatIds = extractFilterIds(normalizedFilters?.chat_id);
+      await assertChatAccess(req, chatIds);
+      return { data: normalizedData, filters: normalizedFilters };
+    }
+    if (action === 'insert') {
+      const chatId = String(normalizedData?.chat_id || '');
+      if (!chatId) throw createHttpError('Missing chat_id', 400);
+      await assertChatAccess(req, [chatId]);
+      return { data: { ...normalizedData, user_id: req.user.id }, filters: normalizedFilters };
+    }
+    if (action === 'deleteWhere') {
+      const chatId = String(normalizedFilters?.chat_id || '');
+      if (!chatId) throw createHttpError('Missing chat_id', 400);
+      const chat = await getChatRecord(chatId);
+      if (!chat) throw createHttpError('Chat not found', 404);
+      if (chat.meeting_id) {
+        if (!(await canManageChat(req, chatId))) throw createHttpError('Forbidden', 403);
+      } else {
+        await assertChatAccess(req, [chatId]);
+      }
+    }
+    if (action === 'update' || action === 'delete') {
+      throw createHttpError('Forbidden', 403);
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'notifications') {
+    requireAuthenticatedUser(req);
+    if (action === 'select' || action === 'count') {
+      if (!isAdmin(req)) {
+        if (normalizedFilters.admin_profile_id && String(normalizedFilters.admin_profile_id) !== String(req.user.id)) {
+          throw createHttpError('Forbidden', 403);
+        }
+        normalizedFilters.admin_profile_id = req.user.id;
+      }
+    }
+    if (action === 'update') {
+      const rowId = String(normalizedData?.id || '');
+      const rows = await selectRows('notifications', { id: rowId, $limit: 1 });
+      const row = (rows || [])[0];
+      if (!row) throw createHttpError('Not found', 404);
+      if (!isAdmin(req) && String(row.admin_profile_id || '') !== String(req.user.id)) {
+        throw createHttpError('Forbidden', 403);
+      }
+    }
+    if (action === 'insert') {
+      return { data: normalizedData, filters: normalizedFilters };
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'reports') {
+    if (action === 'insert') {
+      return { data: normalizedData, filters: normalizedFilters };
+    }
+    if (!isAdmin(req)) {
+      throw createHttpError('Forbidden', 403);
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'bans' || table === 'ban_appeals') {
+    if (table === 'ban_appeals' && action === 'insert') {
+      return { data: normalizedData, filters: normalizedFilters };
+    }
+    if (!isAdmin(req)) {
+      throw createHttpError('Forbidden', 403);
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  if (table === 'topics') {
+    if (action !== 'select' && action !== 'count') {
+      throw createHttpError('Forbidden', 403);
+    }
+    return { data: normalizedData, filters: normalizedFilters };
+  }
+
+  return { data: normalizedData, filters: normalizedFilters };
 }
 
 app.use(cookieParser());
@@ -400,7 +760,8 @@ app.get('/api/csrf-token', (req, res) => {
 });
 
 // DB connectivity check (useful when debugging "topics not loading").
-app.get('/api/db-health', async (_req, res) => {
+app.get('/api/db-health', requireAuth, async (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'Forbidden' });
   try {
     await query('select 1 as ok');
     return res.json({ ok: true, db: true });
@@ -410,7 +771,8 @@ app.get('/api/db-health', async (_req, res) => {
 });
 
 // Quick diagnostic for topics table.
-app.get('/api/debug/topics', async (_req, res) => {
+app.get('/api/debug/topics', requireAuth, async (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'Forbidden' });
   try {
     const countRes = await query('select count(*)::int as count from topics');
     const listRes = await query('select * from topics order by 1 asc limit 5');
@@ -420,7 +782,8 @@ app.get('/api/debug/topics', async (_req, res) => {
   }
 });
 
-app.post('/api/maintenance/cleanup-expired-meetings', async (_req, res) => {
+app.post('/api/maintenance/cleanup-expired-meetings', requireAuth, async (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'Forbidden' });
   try {
     const result = await cleanupExpiredMeetingsServer();
     return res.json({ ok: true, ...result });
@@ -432,13 +795,19 @@ app.post('/api/maintenance/cleanup-expired-meetings', async (_req, res) => {
 app.post('/api/query', async (req, res) => {
   try {
     const { table, action, data, filters } = req.body || {};
-    const normalizedData = normalizeQueryPayload(table, data);
+    const { data: normalizedData, filters: normalizedFilters } = await authorizeQueryOperation(
+      req,
+      table,
+      action,
+      data,
+      filters
+    );
     if (action === 'select') {
-      const rows = await selectRows(table, filters);
+      const rows = await selectRows(table, normalizedFilters);
       return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     if (action === 'count') {
-      const rows = await selectRows(table, filters);
+      const rows = await selectRows(table, normalizedFilters);
       return res.json({ count: Array.isArray(rows) ? rows.length : 0 });
     }
     if (action === 'insert') {
@@ -450,11 +819,19 @@ app.post('/api/query', async (req, res) => {
       return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     if (action === 'delete') {
+      if (table === 'meetings') {
+        const meetingId = String(normalizedData?.id || '');
+        const rows = await selectRows('meetings', { id: meetingId, $limit: 1 });
+        const meeting = (rows || [])[0];
+        if (!meeting) return res.json([]);
+        await deleteMeetingCascade(meetingId);
+        return res.json([meeting]);
+      }
       const rows = await deleteRow(table, normalizedData);
       return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     if (action === 'deleteWhere') {
-      const rows = await deleteWhere(table, filters);
+      const rows = await deleteWhere(table, normalizedFilters);
       return res.json(table === 'profiles' ? normalizeProfilesRows(rows) : rows);
     }
     return res.status(400).json({ error: 'Unknown action' });
@@ -528,6 +905,37 @@ app.get('/api/feed/meetings', async (_req, res) => {
     return res.json(rows);
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed to build meetings feed' });
+  }
+});
+
+app.get('/api/chats/direct-candidate/:peerId', requireAuth, async (req, res) => {
+  try {
+    const currentUserId = String(req.user.id || '');
+    const peerId = String(req.params.peerId || '');
+    if (!peerId) {
+      return res.status(400).json({ error: 'Missing peerId' });
+    }
+    if (peerId === currentUserId) {
+      return res.status(400).json({ error: 'Cannot create direct chat with yourself' });
+    }
+
+    const result = await query(
+      `SELECT *
+         FROM chats
+        WHERE meeting_id IS NULL
+          AND (
+            (owner_id = $1 AND peer_id = $2)
+            OR
+            (owner_id = $2 AND peer_id = $1)
+          )
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [currentUserId, peerId]
+    );
+
+    return res.json((result.rows || [])[0] || null);
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to find direct chat candidate' });
   }
 });
 

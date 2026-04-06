@@ -183,18 +183,7 @@ async function createDirectChat(profile) {
     }
 
     const title = profile.full_name || profile.username || 'Чат';
-    const pairChats = await api.get(TABLES.chats, {
-      meeting_id: null,
-      owner_id: { in: [currentUser.id, profile.id] },
-      peer_id: { in: [currentUser.id, profile.id] }
-    });
-    const archivedDirect = (pairChats || []).find(chat =>
-      !chat.meeting_id
-      && (
-        (chat.owner_id === currentUser.id && chat.peer_id === profile.id)
-        || (chat.owner_id === profile.id && chat.peer_id === currentUser.id)
-      )
-    );
+    const archivedDirect = await api.request(`/api/chats/direct-candidate/${encodeURIComponent(profile.id)}`);
 
     if (archivedDirect?.id) {
       await ensureMembership(

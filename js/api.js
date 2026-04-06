@@ -38,7 +38,16 @@ const api = {
     });
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_e) {
+        payload = null;
+      }
+      const error = new Error(payload?.error || `API error: ${response.status}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
     }
 
     return response.json();

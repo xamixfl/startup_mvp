@@ -47,7 +47,13 @@ async function handleLogin(e) {
     window.location.href = 'index.html';
   } catch (error) {
     console.error('Ошибка входа:', error);
-    if (emailErr) emailErr.textContent = 'Неверный email или пароль';
+    if (error?.status === 429) {
+      const retryAfter = Number(error?.payload?.retry_after_seconds || 0);
+      const suffix = retryAfter > 0 ? ` Попробуйте снова через ${retryAfter} сек.` : '';
+      if (emailErr) emailErr.textContent = `Слишком много попыток входа.${suffix}`;
+    } else if (emailErr) {
+      emailErr.textContent = 'Неверный email или пароль';
+    }
     if (button) {
       button.textContent = originalText;
       button.disabled = false;
@@ -62,4 +68,3 @@ async function signInWithGoogle() {
 async function resetPassword() {
   alert('Сброс пароля пока не поддерживается в локальном API.');
 }
-
