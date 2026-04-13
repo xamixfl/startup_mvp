@@ -1,3 +1,5 @@
+
+
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -20,9 +22,25 @@ const dotenv = require('dotenv');
 })();
 
 const { selectRows, insertRow, updateRow, deleteRow, deleteWhere } = require('./query');
-const { createProfileUser, findProfileByEmail, createSession, deleteSession, setSessionCookie, clearSessionCookie, authMiddleware, requireAuth, updateProfile } = require('./auth');
+const {
+  createProfileUser,
+  findProfileByEmail,
+  createEmailVerification,
+  consumeEmailVerification,
+  createPasswordResetToken,
+  resetPasswordWithToken,
+  markEmailVerified,
+  createSession,
+  deleteSession,
+  setSessionCookie,
+  clearSessionCookie,
+  authMiddleware,
+  requireAuth,
+  updateProfile
+} = require('./auth');
 const { uploader, getUploadRoot } = require('./uploads');
 const { query } = require('./db');
+const { createPublicUrl, sendEmail, buildEmailConfirmationMessage, buildPasswordResetMessage } = require('./mail');
 const bcrypt = require('bcryptjs');
 
 const app = express();
@@ -45,6 +63,13 @@ function normalizeProfilesRows(rows) {
     if (!row.about) {
       if (row.bio) row.about = row.bio;
       else if (row.description) row.about = row.description;
+    }
+    // Ensure both verification fields are present for frontend
+    if (typeof row.verified === 'undefined') {
+      row.verified = !!row.email_verified_at;
+    }
+    if (typeof row.email_verified_at === 'undefined') {
+      row.email_verified_at = row.verified ? new Date().toISOString() : null;
     }
     return row;
   });
@@ -167,11 +192,46 @@ app.get('/api/auth/me', async (req, res) => {
 
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { email, password, username, full_name } = req.body || {};
-    const profile = await createProfileUser(email, password, { username, full_name });
-    const session = await createSession(profile.id);
-    setSessionCookie(res, session);
-    return res.json({ user: profile });
+    const {
+      email,
+      password,
+      username,
+      full_name,
+      age,
+      sex,
+      location,
+      photo_url,
+      interests,
+      about,
+      role,
+      blocked_users
+    } = req.body || {};
+    const profile = await createProfileUser(email, password, {
+      username,
+      full_name,
+      age,
+      sex,
+      location,
+      photo_url,
+      interests,
+      about,
+      role,
+      blocked_users
+    });
+
+    const verificationCode = await createEmailVerification(profile.id, profile.email);
+    const confirmUrl = createPublicUrl(`/login.html?confirm_token=${encodeURIComponent(verificationCode)}`);
+    const mailResult = await sendEmail(buildEmailConfirmationMessage({
+      to: profile.email,
+      fullName: profile.full_name,
+      confirmUrl
+    }));
+
+    return res.status(201).json({
+      ok: true,
+      requires_email_confirmation: true,
+      delivery: mailResult.transport
+    });
   } catch (e) {
     // Unique email constraint
     const msg = String(e && e.message ? e.message : '');
@@ -187,9 +247,13 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body || {};
     const profile = await findProfileByEmail(email);
     if (!profile) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!profile.email_verified_at) {
+      return res.status(403).json({ error: 'Please confirm your email before logging in' });
+    }
     const ok = await bcrypt.compare(String(password || ''), profile.password_hash || '');
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
     const session = await createSession(profile.id);
+    await query('UPDATE profiles SET last_login = now() WHERE id = $1', [profile.id]);
     setSessionCookie(res, session);
     // req.user will be set on next request; return sanitized profile now
     const { password_hash, ...safe } = profile;
@@ -207,6 +271,81 @@ app.post('/api/auth/logout', async (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     return res.status(400).json({ error: e.message || 'Logout failed' });
+  }
+});
+
+app.post('/api/auth/confirm', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    if (!token) return res.status(400).json({ error: 'Missing token' });
+    const userId = await consumeEmailVerification(token);
+    if (!userId) return res.status(400).json({ error: 'Invalid or expired confirmation link' });
+    await markEmailVerified(userId);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Confirmation failed' });
+  }
+});
+
+app.post('/api/auth/resend-verification', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const profile = await findProfileByEmail(email);
+    if (profile && !profile.email_verified_at) {
+      const verificationCode = await createEmailVerification(profile.id, profile.email);
+      const confirmUrl = createPublicUrl(`/login.html?confirm_token=${encodeURIComponent(verificationCode)}`);
+      await sendEmail(buildEmailConfirmationMessage({
+        to: profile.email,
+        fullName: profile.full_name,
+        confirmUrl
+      }));
+    }
+
+    return res.json({
+      ok: true,
+      message: 'If this email exists, verification instructions were sent'
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Could not resend verification email' });
+  }
+});
+
+app.post('/api/auth/request-password-reset', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const profile = await findProfileByEmail(email);
+    if (profile && profile.email_verified_at) {
+      const resetToken = await createPasswordResetToken(profile.id);
+      const resetUrl = createPublicUrl(`/reset-password.html?token=${encodeURIComponent(resetToken)}`);
+      await sendEmail(buildPasswordResetMessage({
+        to: profile.email,
+        fullName: profile.full_name,
+        resetUrl
+      }));
+    }
+
+    return res.json({
+      ok: true,
+      message: 'If this email exists, password reset instructions were sent'
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Could not send reset email' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    const password = String(req.body?.password || '');
+    if (!token) return res.status(400).json({ error: 'Missing token' });
+    await resetPasswordWithToken(token, password);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Password reset failed' });
   }
 });
 

@@ -26,19 +26,49 @@ function generateUuid() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
 async function createProfileUser(email, password, extra = {}) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) throw new Error('Email required');
   if (String(password || '').length < 6) throw new Error('Password too short');
   const passwordHash = await bcrypt.hash(String(password), 10);
-  const username = extra && typeof extra.username === 'string' ? extra.username.trim() : null;
-  const fullName = extra && typeof extra.full_name === 'string' ? extra.full_name.trim() : null;
+  const columns = await getProfilesColumns();
+  const payload = buildProfilePayload({
+    email: normalized,
+    password_hash: passwordHash,
+    last_login: null,
+    username: extra.username,
+    full_name: extra.full_name,
+    age: extra.age,
+    sex: extra.sex,
+    location: extra.location,
+    city: extra.location,
+    photo_url: extra.photo_url,
+    interests: extra.interests,
+    about: extra.about,
+    bio: extra.about,
+    description: extra.about,
+    role: extra.role,
+    blocked_users: extra.blocked_users,
+    email_verified_at: null
+  }, columns);
   const id = generateUuid();
+  payload.id = id;
 
-  // profiles schema is project-specific; we only set fields that are expected to exist.
+  const keys = Object.keys(payload);
+  const values = keys.map(key => payload[key]);
+  const columnsSql = keys.map(key => `"${key}"`).join(', ');
+  const placeholders = keys.map((_, index) => `$${index + 1}`).join(', ');
   const result = await query(
-    'INSERT INTO profiles (id, email, password_hash, username, full_name, last_login) VALUES ($1, $2, $3, $4, $5, now()) RETURNING *',
-    [id, normalized, passwordHash, username || null, fullName || null]
+    `INSERT INTO profiles (${columnsSql}) VALUES (${placeholders}) RETURNING *`,
+    values
   );
   return sanitizeProfile(result.rows[0] || null);
 }
@@ -50,6 +80,69 @@ async function findProfileByEmail(email) {
     [normalized]
   );
   return result.rows[0] || null;
+}
+
+
+const { generateVerificationCode } = require('../utils/verification');
+
+async function createEmailVerification(userId, email) {
+  await query('DELETE FROM email_verifications WHERE user_id = $1', [userId]);
+  const verificationCode = generateVerificationCode(userId, email);
+  await query(
+    `INSERT INTO email_verifications (user_id, verification_code)
+     VALUES ($1, $2)`,
+    [userId, verificationCode]
+  );
+  return verificationCode;
+}
+
+async function consumeEmailVerification(verificationCode) {
+  const result = await query(
+    `DELETE FROM email_verifications
+     WHERE verification_code = $1
+     RETURNING user_id`,
+    [verificationCode]
+  );
+  return result.rows[0]?.user_id || null;
+}
+
+async function createPasswordResetToken(userId) {
+  await query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+  const token = generateToken();
+  const tokenHash = hashToken(token);
+  await query(
+    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+     VALUES ($1, $2, now() + interval '2 hours')`,
+    [userId, tokenHash]
+  );
+  return token;
+}
+
+async function resetPasswordWithToken(token, newPassword) {
+  if (String(newPassword || '').length < 6) throw new Error('Password too short');
+  const tokenHash = hashToken(token);
+  const tokenResult = await query(
+    `DELETE FROM password_reset_tokens
+     WHERE token_hash = $1
+       AND expires_at > now()
+     RETURNING user_id`,
+    [tokenHash]
+  );
+  const userId = tokenResult.rows[0]?.user_id;
+  if (!userId) throw new Error('Invalid or expired reset link');
+
+  const passwordHash = await bcrypt.hash(String(newPassword), 10);
+  await query('UPDATE profiles SET password_hash = $1 WHERE id = $2', [passwordHash, userId]);
+  await query('DELETE FROM sessions WHERE user_id = $1', [userId]);
+  return userId;
+}
+
+async function markEmailVerified(userId) {
+  const result = await query(
+    'UPDATE profiles SET email_verified_at = coalesce(email_verified_at, now()) WHERE id = $1 RETURNING *',
+    [userId]
+  );
+  return sanitizeProfile(result.rows[0] || null);
 }
 
 async function createSession(userId) {
@@ -125,6 +218,35 @@ function sanitizeProfile(profile) {
     else if (rest.description) rest.about = rest.description;
   }
   return rest;
+}
+
+function canUseColumn(columns, name) {
+  return isSafeIdentifier(name) && columns.has(name);
+}
+
+function buildProfilePayload(input, columns) {
+  const payload = {};
+  if (!input || typeof input !== 'object') return payload;
+
+  if (canUseColumn(columns, 'email')) payload.email = String(input.email || '').trim().toLowerCase();
+  if (canUseColumn(columns, 'password_hash')) payload.password_hash = input.password_hash;
+  if (canUseColumn(columns, 'last_login')) payload.last_login = input.last_login;
+  if (canUseColumn(columns, 'username')) payload.username = typeof input.username === 'string' ? input.username.trim() : null;
+  if (canUseColumn(columns, 'full_name')) payload.full_name = typeof input.full_name === 'string' ? input.full_name.trim() : null;
+  if (canUseColumn(columns, 'age') && input.age !== undefined) payload.age = input.age === null ? null : String(input.age);
+  if (canUseColumn(columns, 'sex') && input.sex !== undefined) payload.sex = input.sex || null;
+  if (canUseColumn(columns, 'location') && input.location !== undefined) payload.location = input.location || null;
+  if (canUseColumn(columns, 'city') && input.city !== undefined) payload.city = input.city || null;
+  if (canUseColumn(columns, 'photo_url') && input.photo_url !== undefined) payload.photo_url = input.photo_url || null;
+  if (canUseColumn(columns, 'interests') && input.interests !== undefined) payload.interests = input.interests || [];
+  if (canUseColumn(columns, 'about') && input.about !== undefined) payload.about = input.about || null;
+  if (canUseColumn(columns, 'bio') && input.bio !== undefined) payload.bio = input.bio || null;
+  if (canUseColumn(columns, 'description') && input.description !== undefined) payload.description = input.description || null;
+  if (canUseColumn(columns, 'role') && input.role !== undefined) payload.role = input.role || null;
+  if (canUseColumn(columns, 'blocked_users') && input.blocked_users !== undefined) payload.blocked_users = input.blocked_users || [];
+  if (canUseColumn(columns, 'email_verified_at') && 'email_verified_at' in input) payload.email_verified_at = input.email_verified_at;
+
+  return payload;
 }
 
 function requireAuth(req, res, next) {
@@ -204,6 +326,11 @@ async function getProfilesColumns() {
 module.exports = {
   createProfileUser,
   findProfileByEmail,
+  createEmailVerification,
+  consumeEmailVerification,
+  createPasswordResetToken,
+  resetPasswordWithToken,
+  markEmailVerified,
   createSession,
   deleteSession,
   setSessionCookie,

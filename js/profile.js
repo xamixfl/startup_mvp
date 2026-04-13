@@ -116,8 +116,44 @@ function renderProfile(profile) {
     }
   }
 
+
   const nameEl = document.getElementById('profile-name');
-  if (nameEl) nameEl.textContent = displayName;
+  const badge = document.getElementById('email-verified-badge');
+  const warn = document.getElementById('email-verification-warning');
+  const resendBtn = document.getElementById('resend-verification-btn');
+  if (nameEl && badge) {
+    nameEl.childNodes[0].textContent = displayName + ' ';
+    if (profile.verified || profile.email_verified_at) {
+      badge.innerHTML = '✔️';
+      badge.title = 'Email подтверждён';
+      if (warn) warn.style.display = 'none';
+    } else {
+      badge.innerHTML = '❌';
+      badge.title = 'Email не подтверждён';
+      if (warn) warn.style.display = 'block';
+      if (resendBtn && currentUser && profile.id === currentUser.id) {
+        resendBtn.onclick = async () => {
+          resendBtn.disabled = true;
+          resendBtn.textContent = 'Отправка...';
+          try {
+            await api.request('/api/auth/resend-verification', {
+              method: 'POST',
+              body: JSON.stringify({ email: profile.email })
+            });
+            resendBtn.textContent = 'Письмо отправлено!';
+          } catch (e) {
+            resendBtn.textContent = 'Ошибка';
+          }
+          setTimeout(() => {
+            resendBtn.disabled = false;
+            resendBtn.textContent = 'Отправить письмо ещё раз';
+          }, 3000);
+        };
+      } else if (warn) {
+        warn.style.display = 'none';
+      }
+    }
+  }
 
   const metaEl = document.getElementById('profile-meta');
   if (metaEl) metaEl.textContent = profile.age ? `${profile.age} лет` : 'Возраст не указан';

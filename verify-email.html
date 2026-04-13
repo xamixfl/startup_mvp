@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Подтверждение email — pulse</title>
+  <link rel="icon" href="assets/logo.png" type="image/png">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .verify-container { max-width: 420px; margin: 60px auto; background: #fff; border-radius: 18px; box-shadow: 0 8px 32px rgba(0,0,0,0.08); padding: 36px 32px; text-align: center; }
+    .verify-icon { font-size: 54px; margin-bottom: 18px; }
+    .verify-title { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+    .verify-text { color: #64748b; margin-bottom: 18px; }
+    .verify-btn { background: #3b82f6; color: #fff; border: none; border-radius: 10px; padding: 12px 24px; font-weight: 600; font-size: 16px; cursor: pointer; margin-bottom: 10px; }
+    .verify-btn:disabled { background: #94a3b8; }
+    .verify-success { color: #10b981; margin-top: 10px; }
+    .verify-error { color: #ef4444; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="verify-container">
+    <div class="verify-icon">✉️</div>
+    <div class="verify-title">Подтвердите ваш email</div>
+    <div class="verify-text">Мы отправили письмо с подтверждением на ваш email. Пожалуйста, перейдите по ссылке в письме, чтобы активировать аккаунт.</div>
+    <button id="resend-btn" class="verify-btn">Отправить письмо ещё раз</button>
+    <div id="verify-status"></div>
+    <div style="margin-top:18px; color:#64748b; font-size:14px;">Уже подтвердили? <a href="login.html">Войти</a></div>
+  </div>
+  <script src="js/api.js"></script>
+  <script>
+    const resendBtn = document.getElementById('resend-btn');
+    const statusDiv = document.getElementById('verify-status');
+    let email = localStorage.getItem('pending_email') || '';
+    resendBtn.onclick = async () => {
+      if (!email) {
+        statusDiv.textContent = 'Email не найден. Зарегистрируйтесь заново.';
+        statusDiv.className = 'verify-error';
+        return;
+      }
+      resendBtn.disabled = true;
+      statusDiv.textContent = '';
+      try {
+        await api.request('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
+        statusDiv.textContent = 'Письмо отправлено!';
+        statusDiv.className = 'verify-success';
+      } catch (e) {
+        statusDiv.textContent = e.message || 'Ошибка отправки.';
+        statusDiv.className = 'verify-error';
+      }
+      setTimeout(() => { resendBtn.disabled = false; }, 3000);
+    };
+  </script>
+</body>
+</html>

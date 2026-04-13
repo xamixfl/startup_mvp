@@ -21,6 +21,9 @@ PORT=3000
 DATABASE_URL=postgresql://postgres:password@localhost:5432/pulseapp
 SESSION_COOKIE_NAME=sid
 SESSION_TTL_DAYS=14
+APP_BASE_URL=http://localhost:3000
+RESEND_API_KEY=
+EMAIL_FROM=noreply@example.com
 UPLOAD_DIR=uploads
 ```
 
@@ -40,6 +43,43 @@ If you're using the SSH tunnel to the server DB (recommended for local testing):
 ssh -L 5433:127.0.0.1:5432 admin@45.151.31.223
 psql "postgresql://postgres:password@127.0.0.1:5433/pulseapp" -f server/migrations/003_participants.sql
 ```
+
+For email confirmation and password reset, also apply:
+
+```
+psql "postgresql://postgres:password@127.0.0.1:5433/pulseapp" -f server/migrations/003_email_confirmation_and_resets.sql
+```
+
+## Email delivery
+
+The auth flow now supports:
+
+- email confirmation before first login
+- password reset by email
+
+If `RESEND_API_KEY` and `EMAIL_FROM` are configured, the server sends real emails through Resend.
+
+If Resend is not configured, the server next tries generic SMTP via Nodemailer.
+
+Recommended Resend config:
+
+```env
+RESEND_API_KEY=re_xxxxx
+EMAIL_FROM=noreply@your-domain.com
+```
+
+Optional SMTP fallback example:
+
+```env
+SMTP_HOST=smtp.mail.ru
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=your-mailbox@mail.ru
+SMTP_PASS=your-password
+SMTP_FROM=your-mailbox@mail.ru
+```
+
+If neither Resend nor SMTP is configured, the server falls back to logging the confirmation/reset links in the server console, which is useful for local testing.
 
 ## Run
 

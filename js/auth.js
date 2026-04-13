@@ -23,6 +23,43 @@ function goToStep(step) {
 
   const form = document.getElementById(`step${step}-form`);
   if (form) form.classList.add('active');
+    // Show verification UI in step 4, store email for resend
+    if (step === 4) {
+      const emailInput = document.getElementById('email');
+      if (emailInput && emailInput.value) {
+        localStorage.setItem('pending_email', emailInput.value.trim());
+      }
+      // Update confirmation text
+      setTimeout(() => {
+        const confirmationText = document.getElementById('confirmation-text');
+        if (confirmationText) {
+          confirmationText.innerHTML = 'Письмо отправлено на ваш email. Пожалуйста, проверьте почту и перейдите по ссылке для активации аккаунта.';
+        }
+        const resendBtn = document.getElementById('resend-verification-btn');
+        const statusDiv = document.getElementById('verify-status');
+        if (resendBtn) {
+          resendBtn.onclick = async () => {
+            const email = localStorage.getItem('pending_email') || '';
+            if (!email) {
+              statusDiv.textContent = 'Email не найден. Зарегистрируйтесь заново.';
+              statusDiv.style.color = '#ef4444';
+              return;
+            }
+            resendBtn.disabled = true;
+            statusDiv.textContent = '';
+            try {
+              await api.request('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
+              statusDiv.textContent = 'Письмо отправлено!';
+              statusDiv.style.color = '#10b981';
+            } catch (e) {
+              statusDiv.textContent = e.message || 'Ошибка отправки.';
+              statusDiv.style.color = '#ef4444';
+            }
+            setTimeout(() => { resendBtn.disabled = false; }, 3000);
+          };
+        }
+      }, 200);
+    }
   currentStep = step;
 }
 
@@ -333,17 +370,6 @@ async function validateStep3() {
   const selectedCategories = Array.from(document.querySelectorAll('.category-checkbox:checked')).map(cb => cb.value);
 
   try {
-    // Signup (creates session cookie)
-    await fetch('/api/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, username, full_name: fullName })
-    }).then(async r => {
-      const payload = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(payload?.error || `API error: ${r.status}`);
-      return payload;
-    });
-
     // Upload avatar (optional)
     let photoUrl = 'user';
     if (avatarFile) {
@@ -358,17 +384,18 @@ async function validateStep3() {
       photoUrl = payload?.url || 'user';
     }
 
-    // Complete profile
-    await fetch('/api/users/profile', {
-      method: 'PUT',
+    const signupPayload = await fetch('/api/auth/signup', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        email,
+        password,
         username,
         full_name: fullName,
         age: String(age),
         sex: gender,
         location: city,
-        photo_URL: photoUrl,
+        photo_url: photoUrl,
         interests: selectedCategories,
         about,
         role: 'user',
@@ -380,10 +407,13 @@ async function validateStep3() {
       return payload;
     });
 
-    showNotification('Аккаунт создан', 'success');
-    setTimeout(() => {
-      window.location.href = 'index.html';
-    }, 500);
+    const confirmationText = document.getElementById('confirmation-text');
+    if (confirmationText) {
+      confirmationText.textContent = signupPayload?.delivery === 'log'
+        ? 'Аккаунт создан. Автоматическая отправка письма пока не настроена, поэтому ссылка подтверждения выведена в логах сервера.'
+        : 'Мы отправили письмо с подтверждением на ваш email. Проверьте почту и перейдите по ссылке, чтобы активировать аккаунт.';
+    }
+    goToStep(4);
   } catch (error) {
     console.error('Ошибка регистрации:', error);
     showNotification(error.message || 'Ошибка регистрации', 'error');

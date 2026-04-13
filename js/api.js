@@ -12,7 +12,11 @@ const api = {
     });
     
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+      const payload = await response.json().catch(() => null);
+      const message = payload && payload.error
+        ? payload.error
+        : `API error: ${response.status}`;
+      throw new Error(message);
     }
     
     return await response.json();

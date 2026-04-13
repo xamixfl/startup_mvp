@@ -1,16 +1,34 @@
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('confirmed') === 'true') {
-    const el = document.getElementById('success-message');
-    if (el) el.style.display = 'block';
-  }
+  handleUrlState(urlParams);
 
   const form = document.getElementById('login-form');
   if (form) form.onsubmit = handleLogin;
+  const resetForm = document.getElementById('reset-request-form');
+  if (resetForm) resetForm.onsubmit = handleResetRequest;
+  const backButton = document.getElementById('back-to-login-btn');
+  if (backButton) backButton.onclick = showLoginMode;
 
   window.signInWithGoogle = signInWithGoogle;
   window.resetPassword = resetPassword;
 });
+
+async function handleUrlState(urlParams) {
+  const confirmToken = urlParams.get('confirm_token');
+  const confirmed = urlParams.get('confirmed') === 'true';
+  const resetDone = urlParams.get('reset') === 'success';
+
+  if (confirmToken) {
+    await confirmEmail(confirmToken);
+    return;
+  }
+
+  if (confirmed) {
+    showBanner('Аккаунт подтвержден. Теперь вы можете войти.', 'success');
+  } else if (resetDone) {
+    showBanner('Пароль обновлен. Теперь войдите с новым паролем.', 'success');
+  }
+}
 
 async function handleLogin(e) {
   e.preventDefault();
@@ -47,7 +65,11 @@ async function handleLogin(e) {
     window.location.href = 'index.html';
   } catch (error) {
     console.error('Ошибка входа:', error);
-    if (emailErr) emailErr.textContent = 'Неверный email или пароль';
+    if (emailErr) {
+      emailErr.textContent = /confirm your email/i.test(error.message)
+        ? 'Подтвердите email перед входом'
+        : 'Неверный email или пароль';
+    }
     if (button) {
       button.textContent = originalText;
       button.disabled = false;
@@ -60,6 +82,99 @@ async function signInWithGoogle() {
 }
 
 async function resetPassword() {
-  alert('Сброс пароля пока не поддерживается в локальном API.');
+  const loginEmail = document.getElementById('email');
+  const resetEmail = document.getElementById('reset-email');
+  if (resetEmail && loginEmail && loginEmail.value.trim()) {
+    resetEmail.value = loginEmail.value.trim();
+  }
+  showResetMode();
 }
 
+async function handleResetRequest(event) {
+  event.preventDefault();
+
+  const emailInput = document.getElementById('reset-email');
+  const errorEl = document.getElementById('reset-email-error');
+  const button = document.getElementById('reset-request-btn');
+  const email = emailInput ? emailInput.value.trim() : '';
+  if (errorEl) errorEl.textContent = '';
+
+  if (!email) {
+    if (errorEl) errorEl.textContent = 'Введите email';
+    return;
+  }
+
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Отправляем...';
+  }
+
+  try {
+    await api.request('/api/auth/request-password-reset', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+    showBanner('Если такой email существует, мы отправили письмо для сброса пароля.', 'success');
+    showLoginMode();
+  } catch (error) {
+    showBanner(error.message || 'Не удалось отправить письмо для сброса пароля.', 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+async function confirmEmail(token) {
+  showBanner('Подтверждаем email...', 'success');
+  try {
+    await api.request('/api/auth/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token })
+    });
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete('confirm_token');
+    nextUrl.searchParams.set('confirmed', 'true');
+    window.location.replace(nextUrl.toString());
+  } catch (error) {
+    showBanner('Ссылка подтверждения недействительна или устарела.', 'error');
+  }
+}
+
+function showBanner(message, type) {
+  const el = document.getElementById('success-message');
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = 'block';
+  el.style.background = type === 'error' ? '#fee2e2' : '#d1fae5';
+  el.style.color = type === 'error' ? '#991b1b' : '#065f46';
+  el.style.borderColor = type === 'error' ? '#fecaca' : '#a7f3d0';
+}
+
+function showResetMode() {
+  toggleAuthMode(true);
+}
+
+function showLoginMode() {
+  toggleAuthMode(false);
+}
+
+function toggleAuthMode(isResetMode) {
+  const pageTitle = document.querySelector('.page-title');
+  const loginForm = document.getElementById('login-form');
+  const resetForm = document.getElementById('reset-request-form');
+  const divider = document.querySelector('.divider');
+  const googleButton = document.getElementById('google-login-btn');
+  const links = document.getElementById('login-links');
+
+  if (pageTitle) {
+    pageTitle.textContent = isResetMode ? 'Сброс пароля' : 'Вход в аккаунт';
+  }
+  if (loginForm) loginForm.style.display = isResetMode ? 'none' : '';
+  if (resetForm) resetForm.style.display = isResetMode ? 'block' : 'none';
+  if (divider) divider.style.display = isResetMode ? 'none' : '';
+  if (googleButton) googleButton.style.display = isResetMode ? 'none' : '';
+  if (links) links.style.display = isResetMode ? 'none' : '';
+}
