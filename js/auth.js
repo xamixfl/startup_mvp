@@ -370,52 +370,20 @@ async function validateStep3() {
   const selectedCategories = Array.from(document.querySelectorAll('.category-checkbox:checked')).map(cb => cb.value);
 
   try {
-    // Signup (creates session cookie)
-    await fetch('/api/auth/signup', {
+    // Sign up and create the full profile in one request.
+    const signupPayload = await fetch('/api/auth/signup', {
       method: 'POST',
       credentials: 'same-origin',
       headers: typeof api?.buildHeaders === 'function'
-        ? api.buildHeaders({ method: 'POST', body: JSON.stringify({ email, password, username, full_name: fullName }) })
-        : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, username, full_name: fullName })
-    }).then(async r => {
-      const payload = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(payload?.error || `API error: ${r.status}`);
-      return payload;
-    });
-    // Upload avatar (optional)
-    let photoUrl = 'user';
-    if (avatarFile) {
-      const compressedAvatar = typeof window.compressImageFile === 'function'
-        ? await window.compressImageFile(avatarFile, { maxWidth: 1200, maxHeight: 1200, maxBytes: 900 * 1024, quality: 0.8 })
-        : avatarFile;
-      const form = new FormData();
-      form.append('file', compressedAvatar);
-      const payload = await fetch('/api/upload/avatar', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: typeof api?.buildHeaders === 'function' ? api.buildHeaders({ method: 'POST', body: form }) : {},
-        body: form
-      })
-        .then(async r => {
-          const p = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(p?.error || `Upload error: ${r.status}`);
-          return p;
-        });
-      photoUrl = payload?.url || 'user';
-    }
-    // Complete profile
-    await fetch('/api/users/profile', {
-      method: 'PUT',
-      credentials: 'same-origin',
-      headers: typeof api?.buildHeaders === 'function'
-        ? api.buildHeaders({ method: 'PUT', body: JSON.stringify({
+        ? api.buildHeaders({ method: 'POST', body: JSON.stringify({
+          email,
+          password,
           username,
           full_name: fullName,
           age: String(age),
           sex: gender,
           location: city,
-          photo_URL: photoUrl,
+          photo_url: 'user',
           interests: selectedCategories,
           about,
           role: 'user',
@@ -430,7 +398,7 @@ async function validateStep3() {
         age: String(age),
         sex: gender,
         location: city,
-        photo_url: photoUrl,
+        photo_url: 'user',
         interests: selectedCategories,
         about,
         role: 'user',
