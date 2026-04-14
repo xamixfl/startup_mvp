@@ -485,6 +485,9 @@ async function loadChats(isRefresh = false) {
     const summaryChats = Array.isArray(summary?.chats) ? summary.chats : [];
     chats = await filterOutStaleMeetingChats(summaryChats);
 
+    const pendingOpenChatId = window.__pendingOpenChatId || currentChat?.id || null;
+    chats = chats.filter(chat => chat?.meeting_id || chat?.__lastMessage || isModerationChat(chat) || chat?.id === pendingOpenChatId);
+
     if (chats.length === 0) {
       list.innerHTML = '<div class="chat-item">Нет чатов</div>';
       renderEmptyChat();
