@@ -14,13 +14,22 @@ let messagePollTimer = null;
 let chatListPollTimer = null;
 let typingPollTimer = null;
 let typingTimeoutId = null;
+let chatEventSource = null;
+let chatRealtimeConnected = false;
+const typingStateByChat = new Map();
+let realtimeReconnectTimer = null;
+let chatListRefreshTimer = null;
 
 let currentChatMessageSignature = 'empty';
 let pendingImageFile = null;
 const MAX_IMAGE_MB = 5;
+const MESSAGE_PAGE_SIZE = 50;
 let currentChatLastCreatedAt = null;
 let openedChatReadAt = {};
 const renderedMessageKeysByChat = new Map();
+const loadedMessagesByChat = new Map();
+const hasOlderMessagesByChat = new Map();
+const loadingOlderMessagesByChat = new Map();
 
 function isModerationChat(chat) {
   return Boolean(chat && !chat.meeting_id && LEGACY_ADMIN_CHAT_TITLES.has(String(chat.title || '').trim()));
@@ -130,6 +139,7 @@ async function initChatPage() {
     currentUser = typeof window.getCurrentUser === 'function'
       ? await window.getCurrentUser()
       : await api.request('/api/auth/me');
+    primeProfileCache(currentUser);
 
     if (!currentUser) {
       window.location.href = 'login.html';
@@ -152,17 +162,15 @@ async function initChatPage() {
       TOPICS = await window.fetchTopics();
     }
 
-    if (typeof window.cleanupExpiredMeetings === 'function') {
-      await window.cleanupExpiredMeetings();
-    }
-
     setupChatSelectionFromUrl();
+    startRealtimeStream();
     await loadChats();
     setupSendMessage();
     setupImageUpload();
     setupTypingIndicator();
     setupImageModal();
     setupTitleToggle();
+    setupChatBodyPagination();
 
     startChatListPolling();
   } catch (error) {
@@ -299,7 +307,7 @@ function startChatListPolling() {
   chatListPollTimer = setInterval(async () => {
     if (!currentUser) return;
     await loadChats(true);
-  }, 15000);
+  }, 30000);
 }
 
 function stopChatListPolling() {
@@ -312,7 +320,7 @@ function startMessagePolling(chatId) {
   messagePollTimer = setInterval(async () => {
     if (!currentChat || currentChat.id !== chatId) return;
     await pollNewMessages(chatId);
-  }, 600);
+  }, 3000);
 }
 
 function stopMessagePolling() {
@@ -325,12 +333,97 @@ function startTypingPolling(chatId) {
   typingPollTimer = setInterval(async () => {
     if (!currentChat || currentChat.id !== chatId) return;
     await refreshTypingIndicator(chatId);
-  }, 1000);
+  }, 3000);
 }
 
 function stopTypingPolling() {
   if (typingPollTimer) clearInterval(typingPollTimer);
   typingPollTimer = null;
+}
+
+function startRealtimeStream() {
+  stopRealtimeStream();
+  try {
+    chatEventSource = new EventSource('/api/events/stream');
+  } catch (error) {
+    console.warn('Не удалось открыть realtime-поток:', error);
+    chatRealtimeConnected = false;
+    return;
+  }
+
+  chatEventSource.addEventListener('ready', () => {
+    chatRealtimeConnected = true;
+    stopMessagePolling();
+    stopTypingPolling();
+  });
+
+  chatEventSource.addEventListener('chat_message', async (event) => {
+    let payload = null;
+    try {
+      payload = JSON.parse(event.data || '{}');
+    } catch (_e) {
+      payload = null;
+    }
+    const chatId = payload?.chat_id;
+    const message = payload?.message;
+    if (!chatId || !message) return;
+    await handleRealtimeMessage(chatId, message);
+  });
+
+  chatEventSource.addEventListener('typing', (event) => {
+    let payload = null;
+    try {
+      payload = JSON.parse(event.data || '{}');
+    } catch (_e) {
+      payload = null;
+    }
+    applyRealtimeTypingEvent(payload);
+  });
+
+  chatEventSource.onerror = () => {
+    chatRealtimeConnected = false;
+    if (currentChat?.id) {
+      startMessagePolling(currentChat.id);
+      startTypingPolling(currentChat.id);
+    }
+    if (!realtimeReconnectTimer) {
+      realtimeReconnectTimer = setTimeout(() => {
+        realtimeReconnectTimer = null;
+        startRealtimeStream();
+      }, 3000);
+    }
+  };
+}
+
+function stopRealtimeStream() {
+  if (chatEventSource) {
+    chatEventSource.close();
+    chatEventSource = null;
+  }
+  if (realtimeReconnectTimer) {
+    clearTimeout(realtimeReconnectTimer);
+    realtimeReconnectTimer = null;
+  }
+  chatRealtimeConnected = false;
+}
+
+function scheduleChatListRefresh() {
+  if (chatListRefreshTimer) return;
+  chatListRefreshTimer = setTimeout(async () => {
+    chatListRefreshTimer = null;
+    await loadChats(true);
+  }, 400);
+}
+
+function setupChatBodyPagination() {
+  const body = document.getElementById('chat-body');
+  if (!body || body.dataset.paginationBound === 'true') return;
+  body.dataset.paginationBound = 'true';
+  body.addEventListener('scroll', () => {
+    if (!currentChat?.id) return;
+    if (body.scrollTop > 80) return;
+    loadOlderMessages(currentChat.id).catch(() => {});
+  });
 }
 
 async function removeChatCompletely(chatId) {
@@ -386,50 +479,11 @@ async function loadChats(isRefresh = false) {
   if (!isRefresh) list.innerHTML = '<div class="chat-item">Загрузка...</div>';
 
   try {
-    const moderationChat = await ensureModerationChatExistsForAdmins();
+    await ensureModerationChatExistsForAdmins();
 
-    const hasStatus = await chatMembersHasStatus();
-    let memberships = [];
-    try {
-      memberships = await api.get(TABLES.chat_members, hasStatus
-        ? { user_id: currentUser.id, status: 'approved' }
-        : { user_id: currentUser.id }
-      );
-    } catch (_e) {
-      memberships = [];
-    }
-    const memberChatIds = (memberships || []).map(m => m.chat_id).filter(Boolean);
-
-    // Ensure owner chats are present even if membership rows are missing.
-    const ownedChats = await getOwnedChatsForUser(currentUser.id);
-    const ownedIds = (ownedChats || []).map(c => c.id).filter(Boolean);
-    const missingOwner = ownedIds.filter(id => !memberChatIds.includes(id));
-    for (const chatId of missingOwner) {
-      try {
-        await safeInsertChatMember(hasStatus
-          ? { chat_id: chatId, user_id: currentUser.id, role: 'owner', status: 'approved' }
-          : { chat_id: chatId, user_id: currentUser.id }
-        );
-        memberChatIds.push(chatId);
-      } catch (_e) {
-        // ignore
-      }
-    }
-
-    const adminIds = moderationChat?.id ? [moderationChat.id] : [];
-    const mergedIds = Array.from(new Set([...memberChatIds, ...ownedIds, ...adminIds]));
-    if (mergedIds.length === 0) {
-      chats = [];
-    } else {
-      const chatsRows = await api.get(TABLES.chats, {
-        id: { in: mergedIds },
-        $order: { column: 'created_at', ascending: false }
-      });
-      chats = await filterOutStaleMeetingChats(Array.isArray(chatsRows) ? chatsRows : []);
-    }
-
-    await enrichChatsForUi(chats);
-    await hydrateChatActivity(chats);
+    const summary = await api.request('/api/chats/summary');
+    const summaryChats = Array.isArray(summary?.chats) ? summary.chats : [];
+    chats = await filterOutStaleMeetingChats(summaryChats);
 
     if (chats.length === 0) {
       list.innerHTML = '<div class="chat-item">Нет чатов</div>';
@@ -545,32 +599,31 @@ async function updateChatListUnreadBadges() {
     readMap = raw ? JSON.parse(raw) : {};
   } catch (_e) {}
 
+  const perChatReadMap = {};
+  for (const chat of chats) {
+    const readKey = `${currentUser.id}:${chat.id}`;
+    perChatReadMap[chat.id] = openedChatReadAt[chat.id] || readMap[readKey] || null;
+  }
+
+  let counts = {};
+  try {
+    const summary = await api.request('/api/chats/unread-summary', {
+      method: 'POST',
+      body: JSON.stringify({ lastReadMap: perChatReadMap })
+    });
+    counts = summary?.counts || {};
+  } catch (_e) {
+    counts = {};
+  }
+
   for (const chat of chats) {
     const el = document.querySelector(`.chat-item[data-chat-id="${chat.id}"] .chat-unread`);
     if (!el) continue;
-    // If the chat is currently open, consider it read for UI purposes.
-    if (currentChat && currentChat.id === chat.id) {
-      el.style.display = 'none';
-      continue;
-    }
-    const readKey = `${currentUser.id}:${chat.id}`;
-    const lastRead = openedChatReadAt[chat.id] || readMap[readKey];
-
-    try {
-      const filters = {
-        chat_id: chat.id,
-        user_id: { neq: currentUser.id }
-      };
-      if (lastRead) filters.created_at = { gt: lastRead };
-      const result = await api.query(TABLES.chat_messages, 'count', {}, filters);
-      const count = Number(result && result.count) || 0;
-      if (count > 0) {
-        el.textContent = count > 99 ? '99+' : String(count);
-        el.style.display = 'inline-flex';
-      } else {
-        el.style.display = 'none';
-      }
-    } catch (_e) {
+    const count = currentChat && currentChat.id === chat.id ? 0 : Number(counts[chat.id] || 0);
+    if (count > 0) {
+      el.textContent = count > 99 ? '99+' : String(count);
+      el.style.display = 'inline-flex';
+    } else {
       el.style.display = 'none';
     }
   }
@@ -619,8 +672,13 @@ async function openChat(chatId) {
   if (badgeEl) badgeEl.style.display = 'none';
   updateChatListUnreadBadges().catch(() => {});
 
-  startMessagePolling(chatId);
-  startTypingPolling(chatId);
+  if (chatRealtimeConnected) {
+    stopMessagePolling();
+    stopTypingPolling();
+  } else {
+    startMessagePolling(chatId);
+    startTypingPolling(chatId);
+  }
 }
 
 function renderEmptyChat(text = 'Выберите чат слева') {
@@ -640,44 +698,81 @@ function getMsgCreatedAt(msg) {
   return msg?.created_at || msg?.createdAt || msg?.timestamp || null;
 }
 
+function normalizeMessageProfile(profile) {
+  if (!profile || typeof profile !== 'object') return null;
+  const normalized = { ...profile };
+  if (normalized.photo_url && !normalized.photo_URL) {
+    normalized.photo_URL = normalized.photo_url;
+  }
+  if (normalized.city && !normalized.location) {
+    normalized.location = normalized.city;
+  }
+  if (!normalized.about) {
+    if (normalized.bio) normalized.about = normalized.bio;
+    else if (normalized.description) normalized.about = normalized.description;
+  }
+  return normalized;
+}
+
+function primeProfileCache(profile) {
+  const normalized = normalizeMessageProfile(profile);
+  if (!normalized?.id) return normalized;
+  profileCache.set(normalized.id, normalized);
+  return normalized;
+}
+
+function getMessageProfile(msg, fallbackProfile = null) {
+  const direct = primeProfileCache(msg?.sender_profile || msg?.__profile || fallbackProfile);
+  if (direct) return direct;
+  return msg?.user_id ? (profileCache.get(msg.user_id) || null) : null;
+}
+
 function isAtBottom(bodyEl) {
   if (!bodyEl) return true;
   return (bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight) < 60;
 }
 
-async function loadInitialMessages(chatId) {
+async function fetchChatMessagesPage(chatId, options = {}) {
+  const params = new URLSearchParams();
+  params.set('limit', String(options.limit || MESSAGE_PAGE_SIZE));
+  if (options.before) params.set('before', options.before);
+  if (options.after) params.set('after', options.after);
+  const queryString = params.toString();
+  return api.request(`/api/chats/${encodeURIComponent(chatId)}/messages${queryString ? `?${queryString}` : ''}`, {
+    method: 'GET'
+  });
+}
+
+function renderMessagesFromStore(chatId, options = {}) {
   const body = document.getElementById('chat-body');
-  if (!body) return null;
+  if (!body) return;
+  const messages = loadedMessagesByChat.get(chatId) || [];
 
-  try {
-    let messages = [];
+  body.innerHTML = '';
+  getRenderedKeySet(chatId).clear();
+
+  if (hasOlderMessagesByChat.get(chatId)) {
+    const marker = document.createElement('div');
+    marker.className = 'message-history-marker';
+    marker.textContent = loadingOlderMessagesByChat.get(chatId)
+      ? 'Загрузка более ранних сообщений...'
+      : 'Прокрутите вверх, чтобы загрузить более ранние сообщения';
+    body.appendChild(marker);
+  }
+
+  const userIds = Array.from(new Set(messages.map(m => m.user_id).filter(Boolean)));
+  return (async () => {
+    let profiles = [];
+    const missingIds = userIds.filter(id => !profileCache.has(id));
     try {
-      messages = await api.get(TABLES.chat_messages, {
-        chat_id: chatId,
-        $order: { column: 'created_at', ascending: true },
-        $limit: 200
-      });
+      profiles = missingIds.length ? await api.get(TABLES.profiles, { id: { in: missingIds } }) : [];
     } catch (_e) {
-      // Fallback when server-side ordering isn't available.
-      messages = await api.get(TABLES.chat_messages, { chat_id: chatId, $limit: 200 });
-      messages = (messages || []).sort((a, b) => {
-        const ta = new Date(getMsgCreatedAt(a) || 0).getTime();
-        const tb = new Date(getMsgCreatedAt(b) || 0).getTime();
-        return ta - tb;
-      });
+      profiles = [];
     }
-
-    const signature = computeMessageSignature(messages);
-    currentChatMessageSignature = signature;
-    body.innerHTML = '';
-    getRenderedKeySet(chatId).clear();
-
-    const userIds = Array.from(new Set((messages || []).map(m => m.user_id).filter(Boolean)));
-    const profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
-    const byId = new Map((profiles || []).map(p => [p.id, p]));
+    (profiles || []).forEach(primeProfileCache);
 
     let previousMessageDateKey = null;
-    (messages || []).forEach(msg => {
+    messages.forEach(msg => {
       const messageDateKey = getMessageDateKey(msg.created_at);
       if (messageDateKey && messageDateKey !== previousMessageDateKey) {
         body.appendChild(renderDateSeparator(msg.created_at));
@@ -687,11 +782,32 @@ async function loadInitialMessages(chatId) {
       const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
       getRenderedKeySet(chatId).add(key);
       const mine = msg.user_id === currentUser.id;
-      const p = byId.get(msg.user_id);
+      const p = getMessageProfile(msg, mine ? currentUser : null);
       body.appendChild(renderMessage(msg, p, mine));
     });
 
-    body.scrollTop = body.scrollHeight;
+    if (options.preserveOffset) {
+      const nextHeight = body.scrollHeight;
+      body.scrollTop = Math.max(nextHeight - options.preserveOffset, 0);
+    } else if (options.scrollToBottom) {
+      body.scrollTop = body.scrollHeight;
+    }
+  })();
+}
+
+async function loadInitialMessages(chatId) {
+  const body = document.getElementById('chat-body');
+  if (!body) return null;
+
+  try {
+    const page = await fetchChatMessagesPage(chatId, { limit: MESSAGE_PAGE_SIZE });
+    const messages = Array.isArray(page?.messages) ? page.messages : [];
+    loadedMessagesByChat.set(chatId, messages);
+    hasOlderMessagesByChat.set(chatId, Boolean(page?.has_more));
+
+    const signature = computeMessageSignature(messages);
+    currentChatMessageSignature = signature;
+    await renderMessagesFromStore(chatId, { scrollToBottom: true });
 
     const lastCreatedAt = (messages && messages.length) ? getMsgCreatedAt(messages[messages.length - 1]) : null;
     return { signature, lastCreatedAt };
@@ -734,21 +850,7 @@ async function pollNewMessages(chatId) {
     fresh.push(msg);
   }
   if (fresh.length === 0) return;
-
-  const userIds = Array.from(new Set(fresh.map(m => m.user_id).filter(Boolean)));
-  let profiles = [];
-  try {
-    profiles = userIds.length ? await api.get(TABLES.profiles, { id: { in: userIds } }) : [];
-  } catch (_e) {
-    profiles = [];
-  }
-  const byId = new Map((profiles || []).map(p => [p.id, p]));
-
-  fresh.forEach(msg => {
-    const mine = msg.user_id === currentUser.id;
-    const p = byId.get(msg.user_id);
-    body.appendChild(renderMessage(msg, p, mine));
-  });
+  await appendMessagesToChat(chatId, fresh);
 
   const last = fresh[fresh.length - 1];
   const lastAt = getMsgCreatedAt(last);
@@ -763,6 +865,119 @@ async function pollNewMessages(chatId) {
 
   refreshChatListOrder();
   if (wasAtBottom) body.scrollTop = body.scrollHeight;
+  updateChatListUnreadBadges().catch(() => {});
+}
+
+async function appendMessagesToChat(chatId, fresh, options = {}) {
+  const body = document.getElementById('chat-body');
+  if (!body || !Array.isArray(fresh) || fresh.length === 0) return;
+
+  const wasAtBottom = options.forceScroll ? true : isAtBottom(body);
+  const existing = loadedMessagesByChat.get(chatId) || [];
+  const knownKeys = new Set(existing.map(msg => msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`));
+  const uniqueFresh = fresh.filter(msg => {
+    const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
+    if (knownKeys.has(key)) return false;
+    knownKeys.add(key);
+    return true;
+  });
+  if (uniqueFresh.length === 0) return;
+
+  loadedMessagesByChat.set(chatId, existing.concat(uniqueFresh));
+  const userIds = Array.from(new Set(uniqueFresh.map(m => m.user_id).filter(Boolean)));
+  let profiles = [];
+  const missingIds = userIds.filter(id => !profileCache.has(id) && !uniqueFresh.some(msg => msg.user_id === id && (msg.sender_profile || msg.__profile)));
+  try {
+    profiles = missingIds.length ? await api.get(TABLES.profiles, { id: { in: missingIds } }) : [];
+  } catch (_e) {
+    profiles = [];
+  }
+  (profiles || []).forEach(primeProfileCache);
+
+  uniqueFresh.forEach(msg => {
+    const key = msg.id ? `id:${msg.id}` : `k:${getMsgCreatedAt(msg) || ''}:${msg.user_id || ''}:${msg.content || ''}`;
+    getRenderedKeySet(chatId).add(key);
+    const mine = msg.user_id === currentUser.id;
+    const p = getMessageProfile(msg, mine ? currentUser : null);
+    body.appendChild(renderMessage(msg, p, mine));
+  });
+
+  const last = uniqueFresh[uniqueFresh.length - 1];
+  const lastAt = getMsgCreatedAt(last);
+  if (lastAt) {
+    currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, lastAt);
+    openedChatReadAt[chatId] = isoMax(openedChatReadAt[chatId], lastAt);
+    markChatRead(chatId, lastAt);
+    if (currentChat?.id === chatId) {
+      currentChat.__lastActivityAt = lastAt;
+    }
+  }
+
+  if (wasAtBottom) {
+    body.scrollTop = body.scrollHeight;
+  }
+}
+
+async function loadOlderMessages(chatId) {
+  if (!chatId || loadingOlderMessagesByChat.get(chatId) || !hasOlderMessagesByChat.get(chatId)) return;
+  const currentMessages = loadedMessagesByChat.get(chatId) || [];
+  const oldest = currentMessages.length > 0 ? getMsgCreatedAt(currentMessages[0]) : null;
+  if (!oldest) return;
+
+  loadingOlderMessagesByChat.set(chatId, true);
+  const body = document.getElementById('chat-body');
+  const preserveOffset = body ? (body.scrollHeight - body.scrollTop) : null;
+
+  try {
+    const page = await fetchChatMessagesPage(chatId, {
+      limit: MESSAGE_PAGE_SIZE,
+      before: oldest
+    });
+    const olderMessages = Array.isArray(page?.messages) ? page.messages : [];
+    if (olderMessages.length > 0) {
+      loadedMessagesByChat.set(chatId, olderMessages.concat(currentMessages));
+    }
+    hasOlderMessagesByChat.set(chatId, Boolean(page?.has_more));
+    await renderMessagesFromStore(chatId, {
+      preserveOffset
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки старых сообщений:', error);
+  } finally {
+    loadingOlderMessagesByChat.set(chatId, false);
+  }
+}
+
+async function handleRealtimeMessage(chatId, message) {
+  const chat = chats.find(item => item.id === chatId);
+  const eventAt = getMsgCreatedAt(message) || new Date().toISOString();
+  if (!chat) {
+    scheduleChatListRefresh();
+    return;
+  }
+
+  chat.__lastActivityAt = eventAt;
+  chat.__lastMessage = {
+    id: message.id || null,
+    user_id: message.user_id || null,
+    content: message.content || '',
+    created_at: eventAt
+  };
+
+  if (!currentChat || currentChat.id !== chatId) {
+    refreshChatListOrder();
+    updateChatListUnreadBadges().catch(() => {});
+    return;
+  }
+
+  const key = message.id ? `id:${message.id}` : `k:${getMsgCreatedAt(message) || ''}:${message.user_id || ''}:${message.content || ''}`;
+  if (!getRenderedKeySet(chatId).has(key)) {
+    await appendMessagesToChat(chatId, [message], {
+      forceScroll: message.user_id === currentUser.id
+    });
+  }
+
+  refreshChatListOrder();
   updateChatListUnreadBadges().catch(() => {});
 }
 
@@ -917,27 +1132,15 @@ function setupSendMessage() {
     }
 
     try {
-      const inserted = await api.insert(TABLES.chat_messages, { chat_id: currentChat.id, user_id: currentUser.id, content: text });
-      const row = Array.isArray(inserted) ? inserted[0] : inserted;
+      const row = await api.request(`/api/chats/${encodeURIComponent(currentChat.id)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content: text })
+      });
       input.value = '';
 
-      if (row) {
-        const key = row.id ? `id:${row.id}` : `k:${getMsgCreatedAt(row) || ''}:${row.user_id || ''}:${row.content || ''}`;
-        getRenderedKeySet(currentChat.id).add(key);
-        const body = document.getElementById('chat-body');
-        if (body) {
-          body.appendChild(renderMessage(row, currentUser, true));
-          body.scrollTop = body.scrollHeight;
-        }
-        const at = getMsgCreatedAt(row) || new Date().toISOString();
-        currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, at);
-        openedChatReadAt[currentChat.id] = isoMax(openedChatReadAt[currentChat.id], currentChatLastCreatedAt);
-        markChatRead(currentChat.id, currentChatLastCreatedAt);
-        currentChat.__lastActivityAt = at;
+      if (!chatRealtimeConnected && row) {
+        await handleRealtimeMessage(currentChat.id, row);
       }
-
-      refreshChatListOrder();
-      updateChatListUnreadBadges().catch(() => {});
     } catch (error) {
       console.error('Ошибка отправки сообщения:', error);
       alert(error.message || 'Сообщение не отправлено');
@@ -1010,34 +1213,30 @@ async function uploadAndSendImage(file) {
   if (!currentChat) return;
 
   try {
+    const compressedFile = typeof window.compressImageFile === 'function'
+      ? await window.compressImageFile(file, { maxWidth: 1600, maxHeight: 1600, maxBytes: 1.1 * 1024 * 1024, quality: 0.8 })
+      : file;
     const fd = new FormData();
-    fd.append('file', file);
-    const resp = await fetch('/api/upload/chat-image', { method: 'POST', body: fd });
+    fd.append('file', compressedFile);
+    const resp = await fetch('/api/upload/chat-image', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: typeof api?.buildHeaders === 'function' ? api.buildHeaders({ method: 'POST', body: fd }) : {},
+      body: fd
+    });
     if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
     const json = await resp.json();
     const imageUrl = json && json.url ? json.url : null;
     if (!imageUrl) throw new Error('no url');
 
-    const inserted = await api.insert(TABLES.chat_messages, { chat_id: currentChat.id, user_id: currentUser.id, content: `image:${imageUrl}` });
-    const row = Array.isArray(inserted) ? inserted[0] : inserted;
+    const row = await api.request(`/api/chats/${encodeURIComponent(currentChat.id)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content: `image:${imageUrl}` })
+    });
 
-    if (row) {
-      const key = row.id ? `id:${row.id}` : `k:${getMsgCreatedAt(row) || ''}:${row.user_id || ''}:${row.content || ''}`;
-      getRenderedKeySet(currentChat.id).add(key);
-      const body = document.getElementById('chat-body');
-      if (body) {
-        body.appendChild(renderMessage(row, currentUser, true));
-        body.scrollTop = body.scrollHeight;
-      }
-      const at = getMsgCreatedAt(row) || new Date().toISOString();
-      currentChatLastCreatedAt = isoMax(currentChatLastCreatedAt, at);
-      openedChatReadAt[currentChat.id] = isoMax(openedChatReadAt[currentChat.id], currentChatLastCreatedAt);
-      markChatRead(currentChat.id, currentChatLastCreatedAt);
-      currentChat.__lastActivityAt = at;
+    if (!chatRealtimeConnected && row) {
+      await handleRealtimeMessage(currentChat.id, row);
     }
-
-    refreshChatListOrder();
-    updateChatListUnreadBadges().catch(() => {});
   } catch (error) {
     console.error('Ошибка отправки изображения:', error);
     alert('Изображение не отправлено');
@@ -1125,6 +1324,23 @@ function setupTypingIndicator() {
 async function refreshTypingIndicator(chatId) {
   const el = document.getElementById('typing-indicator');
   if (!el) return;
+  if (chatRealtimeConnected) {
+    const perChat = typingStateByChat.get(chatId) || new Map();
+    const now = Date.now();
+    for (const [userId, expiresAt] of perChat.entries()) {
+      if (expiresAt <= now) {
+        perChat.delete(userId);
+      }
+    }
+    if (perChat.size > 0) {
+      el.textContent = 'Собеседник печатает...';
+      el.style.display = 'inline';
+    } else {
+      el.textContent = '';
+      el.style.display = 'none';
+    }
+    return;
+  }
   try {
     const resp = await api.request(`/api/typing?chat_id=${encodeURIComponent(chatId)}`, { method: 'GET' });
     const ids = Array.isArray(resp?.user_ids) ? resp.user_ids : [];
@@ -1138,6 +1354,26 @@ async function refreshTypingIndicator(chatId) {
   } catch (_e) {
     el.textContent = '';
     el.style.display = 'none';
+  }
+}
+
+function applyRealtimeTypingEvent(payload) {
+  const chatId = payload?.chat_id;
+  const userId = payload?.user_id;
+  if (!chatId || !userId || userId === currentUser?.id) return;
+
+  if (!typingStateByChat.has(chatId)) {
+    typingStateByChat.set(chatId, new Map());
+  }
+  const perChat = typingStateByChat.get(chatId);
+  if (payload.is_typing) {
+    perChat.set(userId, Date.now() + TYPING_TTL_MS);
+  } else {
+    perChat.delete(userId);
+  }
+
+  if (currentChat?.id === chatId) {
+    refreshTypingIndicator(chatId).catch(() => {});
   }
 }
 

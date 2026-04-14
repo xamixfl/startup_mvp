@@ -160,7 +160,7 @@ function showResetMode() {
 function showLoginMode() {
   toggleAuthMode(false);
 }
-
+  
 function toggleAuthMode(isResetMode) {
   const pageTitle = document.querySelector('.page-title');
   const loginForm = document.getElementById('login-form');

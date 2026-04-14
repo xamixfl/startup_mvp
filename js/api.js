@@ -1,28 +1,58 @@
-// js/api.js - клиент для работы с локальным API
+function readCookie(name) {
+  const source = `; ${document.cookie || ''}`;
+  const parts = source.split(`; ${name}=`);
+  if (parts.length < 2) return '';
+  return decodeURIComponent(parts.pop().split(';').shift() || '');
+}
+
+function getCsrfToken() {
+  return readCookie('csrf_token');
+}
+
+function buildHeaders(options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const hasJsonBody = options.body !== undefined && options.body !== null && !isFormData;
+
+  if (hasJsonBody && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const method = String(options.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const csrfToken = getCsrfToken();
+    if (csrfToken && !headers['X-CSRF-Token']) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+  }
+
+  return headers;
+}
 
 const api = {
-  // Базовый метод для запросов
   async request(endpoint, options = {}) {
     const response = await fetch(endpoint, {
+      credentials: 'same-origin',
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-      }
+      headers: buildHeaders(options)
     });
-    
+
     if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      const message = payload && payload.error
-        ? payload.error
-        : `API error: ${response.status}`;
-      throw new Error(message);
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_e) {
+        payload = null;
+      }
+      const error = new Error(payload?.error || `API error: ${response.status}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
     }
-    
-    return await response.json();
+
+    return response.json();
   },
 
-  // Универсальный метод для работы с таблицами
   async query(table, action, data = {}, filters = {}) {
     return this.request('/api/query', {
       method: 'POST',
@@ -30,34 +60,28 @@ const api = {
     });
   },
 
-  // Получить записи из таблицы
   async get(table, filters = {}) {
     const result = await this.query(table, 'select', {}, filters);
-    return result; // всегда массив
+    return result;
   },
 
-  // Получить одну запись
   async getOne(table, id) {
     const result = await this.get(table, { id });
     return result[0] || null;
   },
 
-  // Добавить запись
   async insert(table, data) {
     return this.query(table, 'insert', data);
   },
 
-  // Обновить запись
   async update(table, id, data) {
     return this.query(table, 'update', { id, ...data });
   },
 
-  // Удалить запись
   async delete(table, id) {
     return this.query(table, 'delete', { id });
   },
 
-  // Специальные методы для конкретных таблиц
   async getProfile(userId) {
     return this.request(`/api/profiles/${userId}`);
   },
@@ -66,13 +90,17 @@ const api = {
     return this.request('/api/meetings');
   },
 
-  // Для встреч созданных пользователем
   async getUserMeetings(userId) {
     return this.get('meetings', { creator_id: userId });
   },
 
-  // Для чатов пользователя
   async getUserChats(userId) {
     return this.get('chat_members', { user_id: userId });
-  }
+  },
+
+  getCsrfToken,
+  buildHeaders
 };
+
+window.api = api;
+window.getCsrfToken = getCsrfToken;

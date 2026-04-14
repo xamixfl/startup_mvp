@@ -1,4 +1,4 @@
-const { TABLES } = window.APP || {};
+﻿const { TABLES } = window.APP || {};
 const DEFAULT_AVATAR = 'assets/avatar.png';
 
 let currentUser = null;
@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   TOPICS = await window.fetchTopics();
-  await window.cleanupExpiredMeetings();
   await loadMeetings();
   await loadParticipationNotifications();
   setupTabs();
@@ -40,91 +39,11 @@ async function loadMeetings() {
   }
 
   try {
-    const chatMembersHasStatus = async () => {
-      try {
-        await api.get(TABLES.chat_members, { $limit: 1, status: 'approved' });
-        return true;
-      } catch (_e) {
-        return false;
-      }
-    };
-
-    const safeGetMeetings = async (filters) => {
-      // Some deployments may not have `created_at` (or server-side ordering support).
-      // Prefer DB ordering when available, otherwise sort client-side.
-      try {
-        return await api.get(TABLES.meetings, {
-          ...filters,
-          $order: { column: 'created_at', ascending: false }
-        });
-      } catch (_e) {
-        const rows = await api.get(TABLES.meetings, filters);
-        return (rows || []).sort((a, b) => {
-          const ta = new Date(a?.created_at || a?.updated_at || 0).getTime();
-          const tb = new Date(b?.created_at || b?.updated_at || 0).getTime();
-          return tb - ta;
-        });
-      }
-    };
-
-    const ownedMeetings = await safeGetMeetings({ creator_id: currentUser.id });
-
-    // Participation can be stored either in TABLES.participants (legacy "table-connector")
-    // or via chat membership (chat_members -> chats.meeting_id).
-    const participantMeetingIds = new Set();
-    try {
-      const participantRows = await api.get(TABLES.participants, { user_id: currentUser.id });
-      (participantRows || []).forEach(item => {
-        if (item?.meeting_id) participantMeetingIds.add(item.meeting_id);
-      });
-    } catch (_e) {
-      // ignore
-    }
-
-    try {
-      const hasStatus = await chatMembersHasStatus();
-      const memberships = await api.get(TABLES.chat_members, hasStatus
-        ? { user_id: currentUser.id, status: 'approved' }
-        : { user_id: currentUser.id }
-      );
-      const chatIds = Array.from(new Set((memberships || []).map(m => m.chat_id).filter(Boolean)));
-      if (chatIds.length > 0) {
-        const chatsRows = await api.get(TABLES.chats, { id: { in: chatIds } });
-        (chatsRows || []).forEach(chat => {
-          if (chat?.meeting_id) participantMeetingIds.add(chat.meeting_id);
-        });
-      }
-    } catch (_e) {
-      // ignore
-    }
-
-    let participantMeetings = [];
-    if (participantMeetingIds.size > 0) {
-      participantMeetings = await safeGetMeetings({ id: { in: Array.from(participantMeetingIds) } });
-    }
-
-    // Merge + dedupe by meeting id (can happen when creator is also listed as participant).
-    const byMeetingId = new Map();
-    (ownedMeetings || []).forEach(m => {
-      if (!m?.id) return;
-      byMeetingId.set(m.id, { ...m, role: 'owner' });
+    const summary = await api.request('/api/my-events/summary');
+    allMeetings = Array.isArray(summary?.meetings) ? summary.meetings : [];
+    allMeetings.forEach(meeting => {
+      if (meeting?.creator) window.primeProfileCache?.(meeting.creator);
     });
-    (participantMeetings || []).forEach(m => {
-      if (!m?.id) return;
-      const existing = byMeetingId.get(m.id);
-      if (existing) return;
-      const role = m.creator_id === currentUser.id ? 'owner' : 'participant';
-      byMeetingId.set(m.id, { ...m, role });
-    });
-    allMeetings = Array.from(byMeetingId.values());
-
-    const creatorIds = Array.from(new Set(allMeetings.map(m => m.creator_id).filter(Boolean)));
-    const creators = creatorIds.length > 0
-      ? await api.get(TABLES.profiles, { id: { in: creatorIds } })
-      : [];
-    const byId = new Map((creators || []).map(p => [p.id, p]));
-
-    allMeetings = allMeetings.map(m => ({ ...m, creator: byId.get(m.creator_id) || null }));
     renderMeetings(currentFilter);
   } catch (error) {
     console.error('Ошибка загрузки встреч:', error);
@@ -199,93 +118,25 @@ function startNotificationsPolling() {
   notificationsPollTimer = setInterval(async () => {
     if (!currentUser) return;
     await loadParticipationNotifications(true);
-  }, 15000);
+  }, 30000);
 }
 
 async function loadParticipationNotifications(silent = false) {
   if (!currentUser) return;
 
   try {
-    const rows = await api.get(TABLES.notifications, {
-      admin_profile_id: currentUser.id,
-      $order: { column: 'created_at', ascending: false },
-      $limit: 20
+    const summary = await api.request('/api/my-events/notifications?limit=20');
+    participationNotifications = Array.isArray(summary?.notifications) ? summary.notifications : [];
+    participationNotifications.forEach(notification => {
+      (notification?.pendingRequests || []).forEach(item => {
+        if (item?.profile) window.primeProfileCache?.(item.profile);
+      });
     });
-    const filtered = (rows || []).filter(item => PARTICIPATION_NOTIFICATION_TYPES.has(item.notification_type));
-    participationNotifications = await enrichParticipationNotifications(filtered);
     renderParticipationNotifications();
   } catch (error) {
     console.error('Ошибка загрузки уведомлений:', error);
     if (!silent) renderNotificationsError();
   }
-}
-
-async function enrichParticipationNotifications(notifications) {
-  if (!Array.isArray(notifications) || notifications.length === 0) return [];
-
-  const meetingIds = Array.from(new Set(
-    notifications
-      .filter(item => item.related_table === 'meetings' && item.related_id)
-      .map(item => item.related_id)
-  ));
-
-  const meetings = meetingIds.length > 0
-    ? await api.get(TABLES.meetings, { id: { in: meetingIds } })
-    : [];
-  const meetingsById = new Map((meetings || []).map(meeting => [meeting.id, meeting]));
-
-  const requestMeetings = notifications
-    .filter(item => item.notification_type === 'event_join_request')
-    .map(item => meetingsById.get(item.related_id))
-    .filter(meeting => meeting?.id && meeting?.chat_id);
-
-  const requestMeetingIds = new Set(requestMeetings.map(meeting => meeting.id));
-  const requestChatIds = Array.from(new Set(requestMeetings.map(meeting => meeting.chat_id)));
-  let pendingByMeetingId = new Map();
-
-  if (requestChatIds.length > 0) {
-    const pendingRows = await api.get(TABLES.chat_members, {
-      chat_id: { in: requestChatIds },
-      status: 'pending'
-    });
-    const profileIds = Array.from(new Set((pendingRows || []).map(row => row.user_id).filter(Boolean)));
-    const profiles = profileIds.length > 0
-      ? await api.get(TABLES.profiles, { id: { in: profileIds } })
-      : [];
-    const profilesById = new Map((profiles || []).map(profile => [profile.id, profile]));
-    const meetingIdByChatId = new Map(requestMeetings.map(meeting => [meeting.chat_id, meeting.id]));
-
-    pendingByMeetingId = new Map(Array.from(requestMeetingIds).map(meetingId => [meetingId, []]));
-    (pendingRows || []).forEach(row => {
-      const meetingId = meetingIdByChatId.get(row.chat_id);
-      if (!meetingId) return;
-      const profile = profilesById.get(row.user_id);
-      const pending = pendingByMeetingId.get(meetingId) || [];
-      pending.push({
-        membershipId: row.id,
-        userId: row.user_id,
-        createdAt: row.created_at || null,
-        profile,
-        displayName: getProfileDisplayName(profile, row.user_id)
-      });
-      pendingByMeetingId.set(meetingId, pending);
-    });
-  }
-
-  return notifications.map(notification => {
-    const meeting = meetingsById.get(notification.related_id) || null;
-    const pendingRequests = meeting?.id ? (pendingByMeetingId.get(meeting.id) || []) : [];
-    const resolvedRequest = notification.notification_type === 'event_join_request'
-      ? resolveNotificationRequest(notification, pendingRequests)
-      : null;
-
-    return {
-      ...notification,
-      meeting,
-      pendingRequests,
-      resolvedRequest
-    };
-  });
 }
 
 function renderParticipationNotifications() {
@@ -541,8 +392,10 @@ function getNotificationBodyText(notification) {
 async function fetchNotificationUserName(userId) {
   if (!userId) return 'Пользователь';
   try {
-    const rows = await api.get(TABLES.profiles, { id: userId, $limit: 1 });
-    return getProfileDisplayName((rows || [])[0], userId);
+    const profile = typeof window.getProfileCached === 'function'
+      ? await window.getProfileCached(userId)
+      : (await api.get(TABLES.profiles, { id: userId, $limit: 1 }))[0];
+    return getProfileDisplayName(profile, userId);
   } catch (_error) {
     return userId;
   }
@@ -720,23 +573,9 @@ window.deleteMeeting = async function (meetingId) {
       return;
     }
 
-    if (meeting.chat_id) {
-      try {
-        await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id });
-      } catch (_e) {}
-      try {
-        await api.query(TABLES.chat_messages, 'deleteWhere', {}, { chat_id: meeting.chat_id });
-      } catch (_e) {}
-      try {
-        await api.delete(TABLES.chats, meeting.chat_id);
-      } catch (_e) {}
-    }
-
-    // Keep legacy participants ("table-connector") clean.
-    try {
-      await api.query(TABLES.participants, 'deleteWhere', {}, { meeting_id: meetingId });
-    } catch (_e) {}
-    await api.delete(TABLES.meetings, meetingId);
+    await api.request(`/api/meetings/${encodeURIComponent(meetingId)}/cascade`, {
+      method: 'DELETE'
+    });
     await loadMeetings();
   } catch (error) {
     console.error('Ошибка удаления встречи:', error);

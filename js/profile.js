@@ -219,18 +219,7 @@ async function createDirectChat(profile) {
     }
 
     const title = profile.full_name || profile.username || 'Чат';
-    const pairChats = await api.get(TABLES.chats, {
-      meeting_id: null,
-      owner_id: { in: [currentUser.id, profile.id] },
-      peer_id: { in: [currentUser.id, profile.id] }
-    });
-    const archivedDirect = (pairChats || []).find(chat =>
-      !chat.meeting_id
-      && (
-        (chat.owner_id === currentUser.id && chat.peer_id === profile.id)
-        || (chat.owner_id === profile.id && chat.peer_id === currentUser.id)
-      )
-    );
+    const archivedDirect = await api.request(`/api/chats/direct-candidate/${encodeURIComponent(profile.id)}`);
 
     if (archivedDirect?.id) {
       await ensureMembership(
@@ -852,9 +841,17 @@ function setupEditFormSubmit() {
     const file = fileInput && fileInput.files && fileInput.files[0];
     if (file) {
       try {
+        const compressedFile = typeof window.compressImageFile === 'function'
+          ? await window.compressImageFile(file, { maxWidth: 1200, maxHeight: 1200, maxBytes: 900 * 1024, quality: 0.8 })
+          : file;
         const fd = new FormData();
-        fd.append('file', file);
-        const resp = await fetch('/api/upload/avatar', { method: 'POST', body: fd });
+        fd.append('file', compressedFile);
+      const resp = await fetch('/api/upload/avatar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: typeof api?.buildHeaders === 'function' ? api.buildHeaders({ method: 'POST', body: fd }) : {},
+        body: fd
+      });
         if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
         const json = await resp.json();
         photo_URL = json && json.url ? json.url : photo_URL;

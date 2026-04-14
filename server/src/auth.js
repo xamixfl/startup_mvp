@@ -16,6 +16,13 @@ function sessionTtlDays() {
   return Number.isFinite(days) && days > 0 ? days : 14;
 }
 
+function shouldUseSecureCookies() {
+  const raw = process.env.COOKIE_SECURE;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return process.env.NODE_ENV === 'production';
+}
+
 function generateUuid() {
   // Node 16+ supports crypto.randomUUID(). Keep a safe fallback for older runtimes.
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -174,13 +181,17 @@ function setSessionCookie(res, session) {
   res.cookie(cookieName, session.token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: false,
+    secure: shouldUseSecureCookies(),
     expires: new Date(session.expires_at)
   });
 }
 
 function clearSessionCookie(res) {
-  res.clearCookie(getCookieName());
+  res.clearCookie(getCookieName(), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: shouldUseSecureCookies()
+  });
 }
 
 async function authMiddleware(req, _res, next) {

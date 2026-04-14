@@ -41,7 +41,13 @@ If you're using the SSH tunnel to the server DB (recommended for local testing):
 
 ```
 ssh -L 5433:127.0.0.1:5432 admin@45.151.31.223
-psql "postgresql://postgres:password@127.0.0.1:5433/pulseapp" -f server/migrations/003_participants.sql
+psql "postgresql://postgres:password@127.0.0.1:5433/pulseapp" -f server/migrations/003_performance_indexes.sql
+```
+
+Performance indexes:
+
+```
+psql "postgresql://postgres:password@localhost:5432/pulseapp" -f server/migrations/003_performance_indexes.sql
 ```
 
 For email confirmation and password reset, also apply:
