@@ -4,14 +4,27 @@ let isSubmitting = false;
 let editingMeetingId = null;
 let currentUser = null;
 let currentProfile = null;
+let allTopics = [];
+let allMeetingTopics = [];
+let meetingTopicsMenuOpen = false;
 
 const MAX_LIFETIME_HOURS = 72;
 const TIME_STEP_MINUTES = 15;
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   await populateTopicDropdown();
   await checkAuthOrRedirect();
   setupExpiresInputs();
+  setupTopicSearch();
 
   const urlParams = new URLSearchParams(window.location.search);
   const editId = urlParams.get('edit');
@@ -101,20 +114,222 @@ function setupExpiresInputs() {
 }
 
 async function populateTopicDropdown() {
-  const select = document.getElementById('meeting-topic');
-  if (!select || !window.fetchTopics) return;
+  if (!window.fetchTopics) return;
   const topics = await window.fetchTopics();
-  const selectableTopics = typeof window.getSelectableTopics === 'function'
-    ? window.getSelectableTopics(topics)
-    : (topics || []).filter(topic => !topic?.is_group);
-  selectableTopics.forEach(topic => {
-    const option = document.createElement('option');
-    option.value = topic.id;
-    option.textContent = typeof window.getTopicDisplayName === 'function'
-      ? window.getTopicDisplayName(topic)
-      : topic.name;
-    select.appendChild(option);
+  allTopics = Array.isArray(topics) ? topics : [];
+  allMeetingTopics = typeof window.getSelectableTopics === 'function'
+    ? window.getSelectableTopics(allTopics)
+    : allTopics.filter(topic => !topic?.is_group);
+  renderMeetingTopicOptions(allTopics);
+  updateMeetingSelectedTopic();
+}
+
+function renderMeetingTopicOptions(topics) {
+  const container = document.getElementById('meeting-categories-container');
+  if (!container) return;
+
+  const selectedValue = document.getElementById('meeting-topic')?.value || '';
+  container.innerHTML = '';
+
+  let groups = typeof window.groupTopicsForDisplay === 'function'
+    ? window.groupTopicsForDisplay(topics)
+    : [{ title: 'Категории', items: topics }];
+  groups = groups.map(group => ({
+    ...group,
+    items: (group.items || []).filter(topic => !topic?.is_group)
+  })).filter(group => group.items.length > 0);
+
+  groups.forEach(group => {
+    const groupEl = document.createElement('section');
+    groupEl.className = 'topic-filter-group';
+    groupEl.dataset.groupId = group.id || '';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'topic-filter-group-trigger';
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.innerHTML = `
+      <span class="topic-filter-group-trigger-main">
+        ${group.icon ? `<span class="topic-filter-group-icon">${escapeHtml(group.icon)}</span>` : ''}
+        <span class="topic-filter-group-title">${escapeHtml(group.title)}</span>
+      </span>
+      <span class="topic-filter-group-arrow">▼</span>
+    `;
+
+    const itemsWrap = document.createElement('div');
+    itemsWrap.className = 'topic-filter-options';
+    itemsWrap.hidden = true;
+
+    group.items.forEach(topic => {
+      const radioId = `meeting-topic-${topic.id}`;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'category-option';
+      const icon = typeof window.getTopicIcon === 'function' ? window.getTopicIcon(topic) : '';
+      const displayName = typeof window.getTopicDisplayName === 'function'
+        ? window.getTopicDisplayName(topic)
+        : topic.name;
+      const checked = String(topic.id) === String(selectedValue) ? 'checked' : '';
+      const iconHtml = icon ? `<span class="category-icon">${icon}</span>` : '';
+
+      wrapper.innerHTML = `
+        <input type="radio" name="meeting-topic-choice" id="${radioId}" class="category-radio" value="${topic.id}" ${checked}>
+        <label for="${radioId}" class="category-label">
+          ${iconHtml}
+          <span>${displayName}</span>
+        </label>
+      `;
+      itemsWrap.appendChild(wrapper);
+    });
+
+    trigger.addEventListener('click', () => toggleMeetingTopicGroup(groupEl));
+    groupEl.appendChild(trigger);
+    groupEl.appendChild(itemsWrap);
+    container.appendChild(groupEl);
+
+    const hasSelectedTopic = group.items.some(topic => String(topic.id) === String(selectedValue));
+    setMeetingTopicGroupOpen(groupEl, hasSelectedTopic);
   });
+
+  container.querySelectorAll('.category-radio').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const hiddenInput = document.getElementById('meeting-topic');
+      if (hiddenInput) hiddenInput.value = radio.value;
+      updateMeetingSelectedTopic();
+      closeMeetingTopicsMenu();
+    });
+  });
+
+  updateMeetingCategoriesEmptyState();
+}
+
+function setupTopicSearch() {
+  const trigger = document.getElementById('meeting-categories-trigger');
+  const menu = document.getElementById('meeting-categories-menu');
+  const searchInput = document.getElementById('meeting-categories-search');
+  const dropdown = document.getElementById('meeting-categories-dropdown');
+
+  if (!trigger || !menu || !searchInput || !dropdown) return;
+
+  trigger.addEventListener('click', () => {
+    if (meetingTopicsMenuOpen) closeMeetingTopicsMenu();
+    else openMeetingTopicsMenu();
+  });
+
+  searchInput.addEventListener('input', e => filterMeetingTopicsList(e.target.value));
+
+  document.addEventListener('click', e => {
+    if (!dropdown.contains(e.target)) closeMeetingTopicsMenu();
+  });
+}
+
+function openMeetingTopicsMenu() {
+  const trigger = document.getElementById('meeting-categories-trigger');
+  const menu = document.getElementById('meeting-categories-menu');
+  const searchInput = document.getElementById('meeting-categories-search');
+  if (!trigger || !menu) return;
+
+  meetingTopicsMenuOpen = true;
+  trigger.classList.add('open');
+  trigger.setAttribute('aria-expanded', 'true');
+  menu.classList.add('open');
+  if (searchInput) {
+    searchInput.focus();
+    filterMeetingTopicsList(searchInput.value || '');
+  }
+}
+
+function closeMeetingTopicsMenu() {
+  const trigger = document.getElementById('meeting-categories-trigger');
+  const menu = document.getElementById('meeting-categories-menu');
+  if (!trigger || !menu) return;
+
+  meetingTopicsMenuOpen = false;
+  trigger.classList.remove('open');
+  trigger.setAttribute('aria-expanded', 'false');
+  menu.classList.remove('open');
+}
+
+function filterMeetingTopicsList(query) {
+  const container = document.getElementById('meeting-categories-container');
+  if (!container) return;
+  const q = String(query || '').trim().toLowerCase();
+
+  container.querySelectorAll('.topic-filter-group').forEach(group => {
+    let groupVisible = 0;
+    group.querySelectorAll('.category-option').forEach(item => {
+      const text = (item.textContent || '').toLowerCase();
+      const selected = item.querySelector('.category-radio:checked');
+      const ok = !q || text.includes(q) || Boolean(selected);
+      item.style.display = ok ? '' : 'none';
+      if (ok) groupVisible += 1;
+    });
+    group.style.display = groupVisible > 0 ? '' : 'none';
+    setMeetingTopicGroupOpen(group, q ? groupVisible > 0 : group.classList.contains('open'));
+  });
+
+  updateMeetingCategoriesEmptyState();
+}
+
+function setMeetingTopicGroupOpen(groupEl, isOpen) {
+  const trigger = groupEl?.querySelector('.topic-filter-group-trigger');
+  const options = groupEl?.querySelector('.topic-filter-options');
+  if (!trigger || !options) return;
+  groupEl.classList.toggle('open', Boolean(isOpen));
+  trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  options.hidden = !isOpen;
+}
+
+function toggleMeetingTopicGroup(groupEl) {
+  if (!groupEl) return;
+  const shouldOpen = !groupEl.classList.contains('open');
+  setMeetingTopicGroupOpen(groupEl, shouldOpen);
+}
+
+function updateMeetingCategoriesEmptyState() {
+  const container = document.getElementById('meeting-categories-container');
+  const empty = document.getElementById('meeting-categories-empty');
+  if (!container || !empty) return;
+
+  const visible = Array.from(container.querySelectorAll('.category-option'))
+    .some(item => item.style.display !== 'none');
+  empty.style.display = visible ? 'none' : 'block';
+}
+
+function updateMeetingSelectedTopic() {
+  const hiddenInput = document.getElementById('meeting-topic');
+  const triggerText = document.getElementById('meeting-categories-trigger-text');
+  const pills = document.getElementById('meeting-selected-topic');
+  const value = hiddenInput?.value || '';
+  const selectedTopic = allMeetingTopics.find(topic => String(topic.id) === String(value));
+
+  if (pills) pills.innerHTML = '';
+
+  if (!selectedTopic) {
+    if (triggerText) triggerText.textContent = 'Выберите категорию';
+    return;
+  }
+
+  const displayName = typeof window.getTopicDisplayName === 'function'
+    ? window.getTopicDisplayName(selectedTopic)
+    : selectedTopic.name;
+  if (triggerText) triggerText.textContent = displayName;
+  if (!pills) return;
+
+  const pill = document.createElement('button');
+  pill.type = 'button';
+  pill.className = 'selected-interest-pill';
+  pill.textContent = displayName;
+  pill.addEventListener('click', clearMeetingSelectedTopic);
+  pills.appendChild(pill);
+}
+
+function clearMeetingSelectedTopic() {
+  const hiddenInput = document.getElementById('meeting-topic');
+  if (hiddenInput) hiddenInput.value = '';
+  document.querySelectorAll('input[name="meeting-topic-choice"]').forEach(radio => {
+    radio.checked = false;
+  });
+  updateMeetingSelectedTopic();
 }
 
 async function checkAuthOrRedirect() {
@@ -312,6 +527,8 @@ async function loadMeetingForEdit(meetingId) {
 
     document.getElementById('meeting-headline').value = meeting.title || '';
     document.getElementById('meeting-topic').value = meeting.topic || '';
+    renderMeetingTopicOptions(allTopics);
+    updateMeetingSelectedTopic();
     document.getElementById('meeting-max-slots').value = meeting.max_slots || 8;
     document.getElementById('meeting-city').value = meeting.location || '';
     document.getElementById('meeting-details').value = meeting.full_description || '';
