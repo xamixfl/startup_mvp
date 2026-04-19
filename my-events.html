@@ -647,6 +647,80 @@
             background: #fef2f2;
         }
 
+        @media (max-width: 760px) {
+            body {
+                padding: 8px 12px 20px;
+            }
+
+            .header {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+
+            .logo {
+                font-size: 30px;
+            }
+
+            .page-title {
+                font-size: 28px;
+            }
+
+            .page-subtitle {
+                margin-bottom: 20px;
+            }
+
+            .tabs {
+                gap: 12px;
+            }
+
+            .tabs-nav {
+                width: 100%;
+                overflow-x: auto;
+                padding-bottom: 4px;
+                scrollbar-width: none;
+            }
+
+            .tabs-nav::-webkit-scrollbar {
+                display: none;
+            }
+
+            .tabs-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
+
+            .notifications-toggle {
+                width: 44px;
+                height: 44px;
+            }
+
+            .meetings-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            .meeting-card {
+                padding: 16px;
+                border-radius: 18px;
+            }
+
+            .meeting-info {
+                gap: 8px;
+            }
+
+            .meeting-menu {
+                right: 10px;
+                width: min(220px, calc(100vw - 40px));
+            }
+
+            .footer {
+                margin-top: 24px;
+                padding-bottom: calc(10px + env(safe-area-inset-bottom));
+            }
+        }
+
         .btn-report-card {
             display: block;
             width: 100%;
