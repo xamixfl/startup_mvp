@@ -476,6 +476,21 @@ async function requestJoin(meeting, user) {
     window.location.href = `login.html?next=${encodeURIComponent(returnTo)}`;
     return;
   }
+
+  const meetingId = meeting?.id || meeting?.meeting_id;
+  if (!meetingId) {
+    showNotification('Невозможно определить встречу');
+    return;
+  }
+
+  const freshMeeting = await fetchMeeting(meetingId);
+  if (!freshMeeting) {
+    showNotification('Встреча не найдена');
+    return;
+  }
+
+  Object.assign(meeting, freshMeeting);
+
   if (isMeetingFull(meeting)) {
     showNotification('Свободных мест сейчас нет');
     await setupChatState(meeting, user);
@@ -494,7 +509,7 @@ async function requestJoin(meeting, user) {
   }
 
   try {
-    const result = await api.request(`/api/meetings/${encodeURIComponent(meeting.id)}/join-request`, {
+    const result = await api.request(`/api/meetings/${encodeURIComponent(meetingId)}/join-request`, {
       method: 'POST',
       body: JSON.stringify({})
     });
@@ -514,6 +529,10 @@ async function requestJoin(meeting, user) {
     await renderParticipantsList(meeting, freshUser || user);
   } catch (e) {
     console.error('Ошибка отправки заявки:', e);
+    if (Number(e?.status) === 404 || Number(e?.statusCode) === 404) {
+      showNotification('Встреча не найдена');
+      return;
+    }
     if (String(e?.message || '').includes('Свободных мест сейчас нет')) {
       showNotification('Свободных мест сейчас нет');
       await setupChatState(meeting, user);

@@ -54,6 +54,7 @@ const TYPING_TTL_MS = 3500;
 const schemaColumnCache = new Map();
 const eventClients = new Map();
 const EXPIRED_MEETINGS_CLEANUP_INTERVAL_MS = 60 * 1000;
+let moderationChatEnsured = false;
 const loginRateLimitState = new Map();
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
@@ -1379,24 +1380,26 @@ app.post('/api/chats/unread-summary', requireAuth, async (req, res) => {
     }
 
     const params = [userId, chatIds];
-    const messagesResult = await query(
-      `SELECT chat_id, created_at
-         FROM chat_messages
-        WHERE chat_id = ANY($2::uuid[])
-          AND user_id <> $1`,
-      params
+    const lastReads = chatIds.map(id => lastReadMap[id] || null);
+    const countsResult = await query(
+      `SELECT x.chat_id AS chat_id,
+              COUNT(m.*) AS count
+         FROM unnest($1::uuid[], $2::timestamptz[]) AS x(chat_id, last_read)
+         LEFT JOIN chat_messages m
+           ON m.chat_id = x.chat_id
+          AND m.user_id <> $3
+          AND (x.last_read IS NULL OR m.created_at > x.last_read)
+        GROUP BY x.chat_id`,
+      [chatIds, lastReads, userId]
     );
 
     const counts = {};
-    for (const chatId of chatIds) {
-      counts[chatId] = 0;
+    for (const row of countsResult.rows || []) {
+      counts[row.chat_id] = Number(row.count || 0);
     }
-
-    for (const row of messagesResult.rows || []) {
-      const chatId = row.chat_id;
-      const lastRead = lastReadMap[chatId];
-      if (!lastRead || new Date(row.created_at).getTime() > new Date(lastRead).getTime()) {
-        counts[chatId] = (counts[chatId] || 0) + 1;
+    for (const chatId of chatIds) {
+      if (!Object.prototype.hasOwnProperty.call(counts, chatId)) {
+        counts[chatId] = 0;
       }
     }
 

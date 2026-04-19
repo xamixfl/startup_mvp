@@ -22,6 +22,8 @@ let chatListRefreshTimer = null;
 
 let currentChatMessageSignature = 'empty';
 let pendingImageFile = null;
+let isSendingMessage = false;
+let moderationChatEnsured = false;
 const MAX_IMAGE_MB = 5;
 const MESSAGE_PAGE_SIZE = 50;
 let currentChatLastCreatedAt = null;
@@ -269,6 +271,7 @@ async function safeInsertChatMember(data) {
 
 async function ensureModerationChatExistsForAdmins() {
   if (!currentUser || currentUser.role !== 'admin') return null;
+  if (moderationChatEnsured) return null;
 
   let admins = [];
   try {
@@ -302,6 +305,7 @@ async function ensureModerationChatExistsForAdmins() {
   }
   if (!chat) return null;
 
+  moderationChatEnsured = true;
   chat.title = ADMIN_MODERATION_CHAT_TITLE;
   chat.is_admin_chat = true;
   chat.__subTitle = 'Жёлтый чат для жалоб и апелляций';
@@ -746,6 +750,16 @@ function renderEmptyChat(text = 'Выберите чат слева') {
   body.innerHTML = `<div class="chat-empty">${escapeHtml(text)}</div>`;
 }
 
+function setChatControlsEnabled(enabled) {
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send');
+  const attachBtn = document.getElementById('chat-attach');
+  if (input) input.disabled = !enabled;
+  if (sendBtn) sendBtn.disabled = !enabled;
+  if (attachBtn) attachBtn.disabled = !enabled;
+  isSendingMessage = !enabled;
+}
+
 function computeMessageSignature(messages) {
   if (!messages || messages.length === 0) return 'empty';
   const last = messages[messages.length - 1];
@@ -1176,18 +1190,24 @@ function setupSendMessage() {
   if (!sendBtn || !input) return;
 
   sendBtn.onclick = async () => {
+    if (isSendingMessage) return;
     const text = input.value.trim();
     if (!currentChat) return;
     if (!text && !pendingImageFile) return;
 
-    await ensureDirectPeer(currentChat);
+    setChatControlsEnabled(false);
+    const ensurePromise = ensureDirectPeer(currentChat).catch(() => {});
 
     if (pendingImageFile) {
       const fileToSend = pendingImageFile;
       pendingImageFile = null;
       clearImagePreview();
       await uploadAndSendImage(fileToSend);
-      if (!text) return;
+      await ensurePromise;
+      if (!text) {
+        setChatControlsEnabled(true);
+        return;
+      }
     }
 
     try {
@@ -1196,6 +1216,7 @@ function setupSendMessage() {
         body: JSON.stringify({ content: text })
       });
       input.value = '';
+      await ensurePromise;
 
       if (!chatRealtimeConnected && row) {
         await handleRealtimeMessage(currentChat.id, row);
@@ -1203,6 +1224,8 @@ function setupSendMessage() {
     } catch (error) {
       console.error('Ошибка отправки сообщения:', error);
       alert(error.message || 'Сообщение не отправлено');
+    } finally {
+      setChatControlsEnabled(true);
     }
   };
 
