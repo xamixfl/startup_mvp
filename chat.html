@@ -190,6 +190,29 @@
       font-weight: 700;
       cursor: pointer;
     }
+    .mobile-chat-back,
+    .mobile-info-toggle {
+      display: none;
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      background: #f8fafc;
+      color: #334155;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      flex: 0 0 auto;
+    }
+
+    .mobile-chat-back:hover,
+    .mobile-info-toggle:hover {
+      background: #eef2ff;
+      border-color: #c7d2fe;
+    }
 
     .typing-indicator {
       font-size: 12px;
@@ -766,6 +789,122 @@
     .app.show-info .info-panel {
       display: flex;
     }
+    .info-overlay {
+      display: none;
+    }
+
+    @media (max-width: 900px) {
+      body,
+      .app,
+      .sidebar,
+      .main {
+        height: 100dvh;
+      }
+
+      .app {
+        display: block;
+        position: relative;
+      }
+
+      .main {
+        display: none;
+      }
+
+      .app.mobile-chat-open .sidebar {
+        display: none;
+      }
+
+      .app.mobile-chat-open .main {
+        display: flex;
+      }
+
+      .mobile-chat-back,
+      .mobile-info-toggle {
+        display: inline-flex;
+      }
+
+      .sidebar {
+        border-right: none;
+      }
+
+      .sidebar-header,
+      .chat-header {
+        padding: 0 12px;
+      }
+
+      .chat-header-left {
+        flex: 1;
+        min-width: 0;
+        gap: 10px;
+      }
+
+      .chat-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .typing-indicator {
+        display: none !important;
+      }
+
+      .chat-list {
+        height: auto;
+        flex: 1;
+        padding: 8px 10px 14px;
+      }
+
+      .chat-body {
+        padding: 12px;
+      }
+
+      .message {
+        max-width: 88%;
+      }
+
+      .chat-input {
+        gap: 10px;
+        padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+      }
+
+      .chat-input textarea {
+        flex-basis: 100%;
+        order: 2;
+      }
+
+      .sidebar-footer {
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+      }
+
+      .info-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.45);
+        z-index: 25;
+      }
+
+      .app.mobile-info-open .info-overlay {
+        display: block;
+      }
+
+      .info-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(88vw, 360px);
+        z-index: 30;
+        display: flex;
+        transform: translateX(100%);
+        transition: transform 0.22s ease;
+        box-shadow: -12px 0 32px rgba(15, 23, 42, 0.18);
+      }
+
+      .app.mobile-info-open .info-panel {
+        transform: translateX(0);
+      }
+    }
   </style>
 </head>
 <body>
@@ -785,10 +924,12 @@
     <main class="main">
       <div class="chat-header">
         <div class="chat-header-left">
+          <button type="button" class="mobile-chat-back" id="mobile-chat-back" aria-label="Назад к списку">←</button>
           <div class="chat-title" id="chat-title">Выберите чат</div>
           <div class="typing-indicator" id="typing-indicator" style="display:none;">Собеседник печатает...</div>
         </div>
         <div class="chat-header-actions">
+          <button type="button" class="mobile-info-toggle" id="mobile-info-toggle" aria-label="Информация о чате">i</button>
           <!-- report button removed by request -->
         </div>
       </div>
@@ -808,6 +949,7 @@
       </div>
     </main>
 
+    <div class="info-overlay" id="info-overlay"></div>
     <aside class="info-panel" id="info-panel">
       <div class="info-content" id="info-content"></div>
     </aside>
@@ -826,3 +968,6 @@
   <script src="js/chat.js"></script>
 </body>
 </html>
+
+
+

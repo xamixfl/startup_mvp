@@ -45,6 +45,60 @@ function showNotification(message) {
   }, 2500);
 }
 
+function isMobileViewport() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function syncMobileChatState(isChatOpen) {
+  const app = document.getElementById('chat-app');
+  if (!app || !isMobileViewport()) return;
+  app.classList.toggle('mobile-chat-open', !!isChatOpen);
+  if (!isChatOpen) {
+    app.classList.remove('mobile-info-open');
+  }
+}
+
+function closeMobileChatView() {
+  syncMobileChatState(false);
+}
+
+function setupMobileLayout() {
+  const backBtn = document.getElementById('mobile-chat-back');
+  if (backBtn && backBtn.dataset.bound !== 'true') {
+    backBtn.dataset.bound = 'true';
+    backBtn.addEventListener('click', () => {
+      closeMobileChatView();
+    });
+  }
+
+  const infoBtn = document.getElementById('mobile-info-toggle');
+  if (infoBtn && infoBtn.dataset.bound !== 'true') {
+    infoBtn.dataset.bound = 'true';
+    infoBtn.addEventListener('click', () => {
+      if (!currentChat) return;
+      toggleInfoPanel();
+    });
+  }
+
+  const overlay = document.getElementById('info-overlay');
+  if (overlay && overlay.dataset.bound !== 'true') {
+    overlay.dataset.bound = 'true';
+    overlay.addEventListener('click', () => toggleInfoPanel(false));
+  }
+
+  window.addEventListener('resize', () => {
+    if (!isMobileViewport()) {
+      const app = document.getElementById('chat-app');
+      if (app) {
+        app.classList.remove('mobile-chat-open');
+        app.classList.remove('mobile-info-open');
+      }
+    } else if (currentChat) {
+      syncMobileChatState(true);
+    }
+  }, { passive: true });
+}
+
 function showChatBootError(error) {
   const list = document.getElementById('chat-list');
   const body = document.getElementById('chat-body');
@@ -171,6 +225,7 @@ async function initChatPage() {
     setupImageModal();
     setupTitleToggle();
     setupChatBodyPagination();
+    setupMobileLayout();
 
     startChatListPolling();
   } catch (error) {
@@ -501,7 +556,7 @@ async function loadChats(isRefresh = false) {
     if (pendingId) {
       window.__pendingOpenChatId = null;
       openChat(pendingId);
-    } else if (!currentChat && chats.length > 0) {
+    } else if (!currentChat && chats.length > 0 && !isMobileViewport()) {
       openChat(chats[0].id);
     } else if (currentChat) {
       // keep selection highlight
@@ -638,6 +693,7 @@ async function openChat(chatId) {
 
   currentChat = chat;
   highlightActiveChat(chatId);
+  syncMobileChatState(true);
 
   const title = document.getElementById('chat-title');
   if (title) title.textContent = getChatDisplayTitle(chat);
@@ -1418,8 +1474,16 @@ function setupTitleToggle() {
 function toggleInfoPanel(force) {
   const app = document.getElementById('chat-app');
   if (!app) return;
-  const next = typeof force === 'boolean' ? force : !app.classList.contains('show-info');
-  app.classList.toggle('show-info', next);
+  const desktopOpen = app.classList.contains('show-info');
+  const mobileOpen = app.classList.contains('mobile-info-open');
+  const next = typeof force === 'boolean' ? force : !(isMobileViewport() ? mobileOpen : desktopOpen);
+
+  if (isMobileViewport()) {
+    app.classList.toggle('mobile-info-open', next);
+  } else {
+    app.classList.toggle('show-info', next);
+  }
+
   if (next) {
     renderInfoPanel(currentChat).catch(() => {});
   }
