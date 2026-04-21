@@ -26,6 +26,9 @@ let isSendingMessage = false;
 let moderationChatEnsured = false;
 const MAX_IMAGE_MB = 5;
 const MESSAGE_PAGE_SIZE = 50;
+const MESSAGE_POLL_INTERVAL_MS = 2000;
+const CHAT_LIST_POLL_INTERVAL_MS = 30000;
+const TYPING_TTL_MS = 3500;
 let currentChatLastCreatedAt = null;
 let openedChatReadAt = {};
 const renderedMessageKeysByChat = new Map();
@@ -366,7 +369,7 @@ function startChatListPolling() {
   chatListPollTimer = setInterval(async () => {
     if (!currentUser) return;
     await loadChats(true);
-  }, 30000);
+  }, CHAT_LIST_POLL_INTERVAL_MS);
 }
 
 function stopChatListPolling() {
@@ -379,7 +382,7 @@ function startMessagePolling(chatId) {
   messagePollTimer = setInterval(async () => {
     if (!currentChat || currentChat.id !== chatId) return;
     await pollNewMessages(chatId);
-  }, 3000);
+  }, MESSAGE_POLL_INTERVAL_MS);
 }
 
 function stopMessagePolling() {
@@ -412,7 +415,6 @@ function startRealtimeStream() {
 
   chatEventSource.addEventListener('ready', () => {
     chatRealtimeConnected = true;
-    stopMessagePolling();
     stopTypingPolling();
   });
 
@@ -735,11 +737,12 @@ async function openChat(chatId) {
   if (badgeEl) badgeEl.style.display = 'none';
   updateChatListUnreadBadges().catch(() => {});
 
+  // Keep lightweight polling always on for the opened chat.
+  // This protects against silent SSE stalls in some proxy/browser setups.
+  startMessagePolling(chatId);
   if (chatRealtimeConnected) {
-    stopMessagePolling();
     stopTypingPolling();
   } else {
-    startMessagePolling(chatId);
     startTypingPolling(chatId);
   }
 }

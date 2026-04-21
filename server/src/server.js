@@ -975,6 +975,57 @@ app.post('/api/meetings/:meetingId/join-request', requireAuth, async (req, res) 
   }
 });
 
+app.post('/api/meetings/:meetingId/leave', requireAuth, async (req, res) => {
+  try {
+    const meetingId = String(req.params.meetingId || '');
+    if (!meetingId) return res.status(400).json({ error: 'Missing meetingId' });
+
+    const meetingRows = await selectRows('meetings', { id: meetingId, $limit: 1 });
+    const meeting = (meetingRows || [])[0];
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    const userId = String(req.user.id || '');
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (String(meeting.creator_id || '') === userId) {
+      return res.status(403).json({ error: 'Creator cannot leave own meeting' });
+    }
+
+    let shouldDecrement = true;
+    if (meeting.chat_id) {
+      const hasStatus = await tableHasColumn('chat_members', 'status');
+      if (hasStatus) {
+        const rows = await selectRows('chat_members', { chat_id: meeting.chat_id, user_id: userId });
+        const membership = (rows || [])[0] || null;
+        shouldDecrement = membership?.status === 'approved';
+      }
+      await deleteWhere('chat_members', { chat_id: meeting.chat_id, user_id: userId });
+    }
+
+    try {
+      await deleteWhere('table-connector', { meeting_id: meetingId, user_id: userId });
+    } catch (_e) {}
+
+    let nextSlots = Number(meeting.current_slots || 0);
+    if (shouldDecrement) {
+      const updateResult = await query(
+        `UPDATE meetings
+            SET current_slots = GREATEST(COALESCE(current_slots, 0) - 1, 0)
+          WHERE id = $1
+          RETURNING current_slots`,
+        [meetingId]
+      );
+      nextSlots = Number(updateResult.rows?.[0]?.current_slots || 0);
+    }
+
+    return res.json({
+      ok: true,
+      current_slots: nextSlots
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Failed to leave meeting' });
+  }
+});
+
 app.delete('/api/meetings/:meetingId/cascade', requireAuth, async (req, res) => {
   try {
     const meetingId = String(req.params.meetingId || '');

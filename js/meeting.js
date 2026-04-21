@@ -611,27 +611,16 @@ async function leaveChat(meeting, user) {
   const confirmLeave = confirm('Покинуть чат встречи?');
   if (!confirmLeave) return;
   try {
-    let shouldDecrement = true;
-    try {
-      const hasStatus = await chatMembersHasStatus();
-      if (hasStatus) {
-        const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
-        const m = (rows || [])[0];
-        shouldDecrement = (m && m.status === 'approved');
-      }
-    } catch (_e) {}
-
     const userName = user.full_name || user.username || 'Пользователь';
     await window.postChatSystemMessage?.(meeting.chat_id, `${userName} покинул чат встречи`, user.id);
 
-    await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: user.id });
-    if (shouldDecrement) {
-      const currentSlots = meeting.current_slots || 1;
-      const nextSlots = Math.max(currentSlots - 1, 0);
-      await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
-      meeting.current_slots = nextSlots;
+    const leaveResult = await api.request(`/api/meetings/${encodeURIComponent(meeting.id)}/leave`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    if (Number.isFinite(Number(leaveResult?.current_slots))) {
+      meeting.current_slots = Number(leaveResult.current_slots);
     }
-    await removeParticipantRecord(meeting.id, user.id);
 
     showNotification('Вы вышли из чата');
     await setupChatState(meeting, user);
