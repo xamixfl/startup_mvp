@@ -1,7 +1,7 @@
 
-
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
@@ -42,6 +42,7 @@ const {
 const { uploader, getUploadRoot } = require('./uploads');
 const { query } = require('./db');
 const { createPublicUrl, sendEmail, buildEmailConfirmationMessage, buildPasswordResetMessage } = require('./mail');
+const { signPendingRegistration, verifyPendingRegistrationToken } = require('../utils/verification');
 const bcrypt = require('bcryptjs');
 
 const app = express();
@@ -57,8 +58,10 @@ const EXPIRED_MEETINGS_CLEANUP_INTERVAL_MS = 60 * 1000;
 const loginRateLimitState = new Map();
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const PENDING_SIGNUP_TTL_MS = Number(process.env.PENDING_REGISTRATION_TTL_MS || (24 * 60 * 60 * 1000));
 const CSRF_COOKIE_NAME = process.env.CSRF_COOKIE_NAME || 'csrf_token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
+let pendingSignupsTableReady = null;
 
 function shouldUseSecureCookies() {
   const raw = process.env.COOKIE_SECURE;
@@ -118,6 +121,213 @@ function pruneExpiredLoginRateLimitEntries(now = Date.now()) {
       loginRateLimitState.delete(key);
     }
   }
+}
+
+function isValidEmailFormat(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function normalizeRegistrationPayload(input = {}) {
+  const ageRaw = input.age;
+  const age = ageRaw === undefined || ageRaw === null || ageRaw === ''
+    ? null
+    : Number.parseInt(ageRaw, 10);
+  const interests = Array.isArray(input.interests)
+    ? input.interests.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+
+  return {
+    email: String(input.email || '').trim().toLowerCase(),
+    password: String(input.password || ''),
+    username: String(input.username || '').trim(),
+    full_name: String(input.full_name || '').trim(),
+    age,
+    sex: String(input.sex || '').trim(),
+    location: String(input.location || '').trim(),
+    photo_url: String(input.photo_url || '').trim() || 'user',
+    interests,
+    about: String(input.about || '').trim(),
+    role: 'user',
+    blocked_users: []
+  };
+}
+
+function validateRegistrationPayload(payload) {
+  if (!isValidEmailFormat(payload.email)) throw new Error('Введите корректный email');
+  if (payload.password.length < 6) throw new Error('Пароль должен быть не менее 6 символов');
+  if (!payload.full_name) throw new Error('Введите ваше имя');
+  if (!Number.isInteger(payload.age) || payload.age < 18 || payload.age > 100) {
+    throw new Error('Возраст должен быть от 18 до 100 лет');
+  }
+  if (!payload.sex) throw new Error('Выберите ваш пол');
+  if (!payload.location) throw new Error('Укажите город или район');
+  if (!payload.username) throw new Error('Введите никнейм');
+  if (payload.username.length < 3) throw new Error('Никнейм должен быть не менее 3 символов');
+  if (!/^[a-zA-Z0-9_]+$/.test(payload.username)) {
+    throw new Error('Никнейм может содержать только латинские буквы, цифры и подчеркивание');
+  }
+  if (!payload.interests.length) throw new Error('Выберите хотя бы одну категорию');
+}
+
+async function doesEmailDomainExist(email) {
+  const domain = String(email || '').trim().toLowerCase().split('@')[1] || '';
+  if (!domain) return false;
+  try {
+    const records = await dns.resolveMx(domain);
+    return Array.isArray(records) && records.length > 0;
+  } catch (error) {
+    if (['ENODATA', 'ENOTFOUND', 'ENOTIMP', 'ESERVFAIL', 'EREFUSED', 'ETIMEOUT', 'ECONNREFUSED'].includes(error?.code)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function isUsernameAvailable(username) {
+  const normalized = String(username || '').trim();
+  if (!normalized) return false;
+  const result = await query(
+    'SELECT 1 FROM profiles WHERE username = $1 LIMIT 1',
+    [normalized]
+  );
+  return (result.rows || []).length === 0;
+}
+
+async function ensurePendingSignupsTable() {
+  if (!pendingSignupsTableReady) {
+    pendingSignupsTableReady = query(`
+      CREATE TABLE IF NOT EXISTS pending_signups (
+        email text PRIMARY KEY,
+        username text NOT NULL,
+        password_hash text NOT NULL,
+        full_name text,
+        age integer,
+        sex text,
+        location text,
+        photo_url text,
+        interests jsonb NOT NULL DEFAULT '[]'::jsonb,
+        about text,
+        role text,
+        blocked_users jsonb NOT NULL DEFAULT '[]'::jsonb,
+        verification_code_hash text NOT NULL,
+        expires_at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `).catch(error => {
+      pendingSignupsTableReady = null;
+      throw error;
+    });
+  }
+  await pendingSignupsTableReady;
+}
+
+function generateConfirmationCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function hashConfirmationCode(code) {
+  return crypto.createHash('sha256').update(String(code || '')).digest('hex');
+}
+
+async function findPendingSignupByEmail(email) {
+  await ensurePendingSignupsTable();
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return null;
+  const result = await query(
+    `SELECT *
+       FROM pending_signups
+      WHERE email = $1
+        AND expires_at > now()
+      LIMIT 1`,
+    [normalized]
+  );
+  return result.rows[0] || null;
+}
+
+async function isPendingUsernameReserved(username, emailToIgnore = '') {
+  await ensurePendingSignupsTable();
+  const normalizedUsername = String(username || '').trim();
+  if (!normalizedUsername) return false;
+  const normalizedEmailToIgnore = String(emailToIgnore || '').trim().toLowerCase();
+  const result = await query(
+    `SELECT 1
+       FROM pending_signups
+      WHERE username = $1
+        AND expires_at > now()
+        AND ($2 = '' OR email <> $2)
+      LIMIT 1`,
+    [normalizedUsername, normalizedEmailToIgnore]
+  );
+  return (result.rows || []).length > 0;
+}
+
+async function createOrReplacePendingSignup(payload) {
+  await ensurePendingSignupsTable();
+  const confirmationCode = generateConfirmationCode();
+  const passwordHash = await bcrypt.hash(String(payload.password || ''), 10);
+  const expiresAt = new Date(Date.now() + PENDING_SIGNUP_TTL_MS).toISOString();
+
+  await query(
+    `INSERT INTO pending_signups (
+       email, username, password_hash, full_name, age, sex, location, photo_url,
+       interests, about, role, blocked_users, verification_code_hash, expires_at, updated_at
+     )
+     VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8,
+       $9::jsonb, $10, $11, $12::jsonb, $13, $14, now()
+     )
+     ON CONFLICT (email) DO UPDATE SET
+       username = EXCLUDED.username,
+       password_hash = EXCLUDED.password_hash,
+       full_name = EXCLUDED.full_name,
+       age = EXCLUDED.age,
+       sex = EXCLUDED.sex,
+       location = EXCLUDED.location,
+       photo_url = EXCLUDED.photo_url,
+       interests = EXCLUDED.interests,
+       about = EXCLUDED.about,
+       role = EXCLUDED.role,
+       blocked_users = EXCLUDED.blocked_users,
+       verification_code_hash = EXCLUDED.verification_code_hash,
+       expires_at = EXCLUDED.expires_at,
+       updated_at = now()`,
+    [
+      payload.email,
+      payload.username,
+      passwordHash,
+      payload.full_name,
+      payload.age,
+      payload.sex,
+      payload.location,
+      payload.photo_url,
+      JSON.stringify(payload.interests || []),
+      payload.about || null,
+      payload.role || 'user',
+      JSON.stringify(payload.blocked_users || []),
+      hashConfirmationCode(confirmationCode),
+      expiresAt
+    ]
+  );
+
+  return { confirmationCode, expiresAt };
+}
+
+async function consumePendingSignup(email, code) {
+  await ensurePendingSignupsTable();
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedCode = String(code || '').trim();
+  if (!normalizedEmail || !normalizedCode) return null;
+
+  const result = await query(
+    `DELETE FROM pending_signups
+      WHERE email = $1
+        AND verification_code_hash = $2
+        AND expires_at > now()
+      RETURNING *`,
+    [normalizedEmail, hashConfirmationCode(normalizedCode)]
+  );
+  return result.rows[0] || null;
 }
 
 function enforceLoginRateLimit(req, res, next) {
@@ -1183,18 +1393,16 @@ app.post('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
       content
     });
     const inserted = insertedRows[0] || null;
-    let message = inserted;
-    if (inserted?.id) {
-      const senderJsonSql = await buildProfileJsonObjectSql('p');
-      const messageResult = await query(
-        `SELECT m.*, ${senderJsonSql} AS sender_profile
-           FROM chat_messages m
-           LEFT JOIN profiles p ON p.id = m.user_id
-          WHERE m.id = $1
-          LIMIT 1`,
-        [inserted.id]
-      );
-      message = (messageResult.rows || [])[0] || inserted;
+    let message = inserted ? { ...inserted } : null;
+    const senderId = actorId || req.user.id;
+    if (message && senderId === String(req.user.id || '')) {
+      message.sender_profile = req.user;
+    } else if (message?.user_id) {
+      const senderRows = await selectRows('profiles', { id: message.user_id, $limit: 1 });
+      const senderProfile = normalizeProfilesRows(senderRows || [])[0] || null;
+      if (senderProfile) {
+        message.sender_profile = senderProfile;
+      }
     }
     if (message) {
       await broadcastToChat(chatId, 'chat_message', {
@@ -1399,41 +1607,86 @@ app.get('/api/auth/me', async (req, res) => {
   return res.json(req.user);
 });
 
+app.post('/api/auth/precheck-signup', async (req, res) => {
+  try {
+    await ensurePendingSignupsTable();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const username = String(req.body?.username || '').trim();
+
+    if (!email && !username) {
+      return res.status(400).json({ error: 'Email or username required' });
+    }
+
+    const checks = [];
+
+    if (email) {
+      if (!isValidEmailFormat(email)) {
+        return res.status(400).json({ error: 'Введите корректный email' });
+      }
+      checks.push(doesEmailDomainExist(email));
+      checks.push(findProfileByEmail(email));
+    } else {
+      checks.push(Promise.resolve(null));
+      checks.push(Promise.resolve(null));
+    }
+
+    if (username) {
+      if (username.length < 3 || !/^[a-zA-Z0-9_]+$/.test(username)) {
+        return res.status(400).json({ error: 'Введите корректный никнейм' });
+      }
+      checks.push(isUsernameAvailable(username));
+      checks.push(isPendingUsernameReserved(username, email));
+    } else {
+      checks.push(Promise.resolve(null));
+      checks.push(Promise.resolve(null));
+    }
+
+    const [domainExists, emailProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all(checks);
+    const pendingSignup = email ? await findPendingSignupByEmail(email) : null;
+
+    return res.json({
+      ok: true,
+      domainExists: email ? !!domainExists : null,
+      emailAvailable: email ? (!emailProfile && !pendingSignup) : null,
+      usernameAvailable: username ? (!!usernameAvailable && !pendingUsernameReserved) : null
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Не удалось проверить email' });
+  }
+});
+
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const {
-      email,
-      password,
-      username,
-      full_name,
-      age,
-      sex,
-      location,
-      photo_url,
-      interests,
-      about,
-      role,
-      blocked_users
-    } = req.body || {};
-    const profile = await createProfileUser(email, password, {
-      username,
-      full_name,
-      age,
-      sex,
-      location,
-      photo_url,
-      interests,
-      about,
-      role,
-      blocked_users
-    });
+    await ensurePendingSignupsTable();
+    const payload = normalizeRegistrationPayload(req.body || {});
+    validateRegistrationPayload(payload);
 
-    const verificationCode = await createEmailVerification(profile.id, profile.email);
-    const confirmUrl = createPublicUrl(`/login.html?confirm_token=${encodeURIComponent(verificationCode)}`);
+    const [domainExists, existingProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all([
+      doesEmailDomainExist(payload.email),
+      findProfileByEmail(payload.email),
+      isUsernameAvailable(payload.username),
+      isPendingUsernameReserved(payload.username, payload.email)
+    ]);
+    const existingPendingSignup = await findPendingSignupByEmail(payload.email);
+
+    if (!domainExists) {
+      return res.status(400).json({ error: 'Введите действительный email' });
+    }
+    if (existingProfile) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+    if (existingPendingSignup) {
+      return res.status(409).json({ error: 'Код подтверждения уже отправлен на этот email' });
+    }
+    if (!usernameAvailable || pendingUsernameReserved) {
+      return res.status(409).json({ error: 'Username already taken' });
+    }
+
+    const verification = await createOrReplacePendingSignup(payload);
     const mailResult = await sendEmail(buildEmailConfirmationMessage({
-      to: profile.email,
-      fullName: profile.full_name,
-      confirmUrl
+      to: payload.email,
+      fullName: payload.full_name,
+      confirmationCode: verification.confirmationCode
     }));
 
     return res.status(201).json({
@@ -1496,12 +1749,65 @@ app.post('/api/auth/logout', async (req, res) => {
 
 app.post('/api/auth/confirm', async (req, res) => {
   try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').trim();
+
+    if (email && code) {
+      const pendingSignup = await consumePendingSignup(email, code);
+      if (!pendingSignup) {
+        return res.status(400).json({ error: 'Неверный или просроченный код подтверждения' });
+      }
+
+      const [domainExists, existingProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all([
+        doesEmailDomainExist(pendingSignup.email),
+        findProfileByEmail(pendingSignup.email),
+        isUsernameAvailable(pendingSignup.username),
+        isPendingUsernameReserved(pendingSignup.username, pendingSignup.email)
+      ]);
+
+      if (!domainExists) {
+        return res.status(400).json({ error: 'Введите действительный email' });
+      }
+      if (existingProfile) {
+        return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
+      }
+      if (!usernameAvailable || pendingUsernameReserved) {
+        return res.status(409).json({ error: 'Этот никнейм уже занят' });
+      }
+
+      await createProfileUser(pendingSignup.email, '', {
+        password_hash: pendingSignup.password_hash,
+        username: pendingSignup.username,
+        full_name: pendingSignup.full_name,
+        age: pendingSignup.age,
+        sex: pendingSignup.sex,
+        location: pendingSignup.location,
+        photo_url: pendingSignup.photo_url,
+        interests: Array.isArray(pendingSignup.interests) ? pendingSignup.interests : [],
+        about: pendingSignup.about,
+        role: pendingSignup.role,
+        blocked_users: Array.isArray(pendingSignup.blocked_users) ? pendingSignup.blocked_users : [],
+        email_verified_at: new Date().toISOString()
+      });
+      return res.json({ ok: true });
+    }
+
+    if (email && code) {
+      const profile = await findProfileByEmail(email);
+      if (profile && !profile.email_verified_at) {
+        const userId = await consumeEmailVerification(profile.id, code);
+        if (!userId) return res.status(400).json({ error: 'Неверный или просроченный код подтверждения' });
+        await markEmailVerified(userId);
+        return res.json({ ok: true });
+      }
+    }
+
     const token = String(req.body?.token || '').trim();
-    if (!token) return res.status(400).json({ error: 'Missing token' });
-    const userId = await consumeEmailVerification(token);
-    if (!userId) return res.status(400).json({ error: 'Invalid or expired confirmation link' });
-    await markEmailVerified(userId);
-    return res.json({ ok: true });
+    if (!token) return res.status(400).json({ error: 'Missing confirmation data' });
+    const pendingRegistration = verifyPendingRegistrationToken(token);
+    if (pendingRegistration) return res.status(400).json({ error: 'Пожалуйста, используйте код подтверждения' });
+
+    return res.status(400).json({ error: 'Пожалуйста, используйте код подтверждения' });
   } catch (e) {
     return res.status(400).json({ error: e.message || 'Confirmation failed' });
   }
@@ -1509,17 +1815,76 @@ app.post('/api/auth/confirm', async (req, res) => {
 
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
+    if (req.body?.registration && typeof req.body.registration === 'object') {
+      await ensurePendingSignupsTable();
+      const payload = normalizeRegistrationPayload(req.body.registration);
+      validateRegistrationPayload(payload);
+
+      const [domainExists, existingProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all([
+        doesEmailDomainExist(payload.email),
+        findProfileByEmail(payload.email),
+        isUsernameAvailable(payload.username),
+        isPendingUsernameReserved(payload.username, payload.email)
+      ]);
+
+      if (!domainExists) {
+        return res.status(400).json({ error: 'Введите действительный email' });
+      }
+      if (existingProfile) {
+        return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
+      }
+      if (!usernameAvailable || pendingUsernameReserved) {
+        return res.status(409).json({ error: 'Этот никнейм уже занят' });
+      }
+
+      const verification = await createOrReplacePendingSignup(payload);
+      await sendEmail(buildEmailConfirmationMessage({
+        to: payload.email,
+        fullName: payload.full_name,
+        confirmationCode: verification.confirmationCode
+      }));
+
+      return res.json({
+        ok: true,
+        message: 'Verification email resent'
+      });
+    }
+
     const email = String(req.body?.email || '').trim().toLowerCase();
     if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const pendingSignup = await findPendingSignupByEmail(email);
+    if (pendingSignup) {
+      const verification = await createOrReplacePendingSignup({
+        email: pendingSignup.email,
+        password: 'placeholder123',
+        username: pendingSignup.username,
+        full_name: pendingSignup.full_name,
+        age: pendingSignup.age,
+        sex: pendingSignup.sex,
+        location: pendingSignup.location,
+        photo_url: pendingSignup.photo_url,
+        interests: Array.isArray(pendingSignup.interests) ? pendingSignup.interests : [],
+        about: pendingSignup.about,
+        role: pendingSignup.role,
+        blocked_users: Array.isArray(pendingSignup.blocked_users) ? pendingSignup.blocked_users : []
+      });
+      await query('UPDATE pending_signups SET password_hash = $2 WHERE email = $1', [pendingSignup.email, pendingSignup.password_hash]);
+      await sendEmail(buildEmailConfirmationMessage({
+        to: pendingSignup.email,
+        fullName: pendingSignup.full_name,
+        confirmationCode: verification.confirmationCode
+      }));
+      return res.json({ ok: true, message: 'If this email exists, verification instructions were sent' });
+    }
 
     const profile = await findProfileByEmail(email);
     if (profile && !profile.email_verified_at) {
       const verificationCode = await createEmailVerification(profile.id, profile.email);
-      const confirmUrl = createPublicUrl(`/login.html?confirm_token=${encodeURIComponent(verificationCode)}`);
       await sendEmail(buildEmailConfirmationMessage({
         to: profile.email,
         fullName: profile.full_name,
-        confirmUrl
+        confirmationCode: verificationCode
       }));
     }
 
@@ -1615,6 +1980,11 @@ app.get('/api/typing', requireAuth, async (req, res) => {
 });
 
 // Upload endpoints (multipart/form-data)
+app.post('/api/auth/upload-avatar', uploader('signup-temp').single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Missing file' });
+  return res.json({ url: `/uploads/signup-temp/${req.file.filename}` });
+});
+
 app.post('/api/upload/avatar', requireAuth, uploader('avatars').single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Missing file' });
   return res.json({ url: `/uploads/avatars/${req.file.filename}` });

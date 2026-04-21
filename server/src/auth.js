@@ -44,8 +44,11 @@ function hashToken(token) {
 async function createProfileUser(email, password, extra = {}) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) throw new Error('Email required');
-  if (String(password || '').length < 6) throw new Error('Password too short');
-  const passwordHash = await bcrypt.hash(String(password), 10);
+  let passwordHash = extra.password_hash || null;
+  if (!passwordHash) {
+    if (String(password || '').length < 6) throw new Error('Password too short');
+    passwordHash = await bcrypt.hash(String(password), 10);
+  }
   const columns = await getProfilesColumns();
   const payload = buildProfilePayload({
     email: normalized,
@@ -64,7 +67,7 @@ async function createProfileUser(email, password, extra = {}) {
     description: extra.about,
     role: extra.role,
     blocked_users: extra.blocked_users,
-    email_verified_at: null
+    email_verified_at: extra.email_verified_at === undefined ? null : extra.email_verified_at
   }, columns);
   const id = generateUuid();
   payload.id = id;
@@ -89,12 +92,9 @@ async function findProfileByEmail(email) {
   return result.rows[0] || null;
 }
 
-
-const { generateVerificationCode } = require('../utils/verification');
-
 async function createEmailVerification(userId, email) {
   await query('DELETE FROM email_verifications WHERE user_id = $1', [userId]);
-  const verificationCode = generateVerificationCode(userId, email);
+  const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
   await query(
     `INSERT INTO email_verifications (user_id, verification_code)
      VALUES ($1, $2)`,
@@ -103,12 +103,13 @@ async function createEmailVerification(userId, email) {
   return verificationCode;
 }
 
-async function consumeEmailVerification(verificationCode) {
+async function consumeEmailVerification(userId, verificationCode) {
   const result = await query(
     `DELETE FROM email_verifications
-     WHERE verification_code = $1
+     WHERE user_id = $1
+       AND verification_code = $2
      RETURNING user_id`,
-    [verificationCode]
+    [userId, verificationCode]
   );
   return result.rows[0]?.user_id || null;
 }

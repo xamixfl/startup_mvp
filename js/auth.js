@@ -1,10 +1,9 @@
-const { TABLES } = window.APP || {};
-
 let currentStep = 1;
 let avatarFile = null;
 let usernameCheckTimeout = null;
 let categoryMenuOpen = false;
 let CATEGORIES = [];
+const PENDING_SIGNUP_STORAGE_KEY = 'pending_signup_payload';
 
 document.addEventListener('DOMContentLoaded', async () => {
   CATEGORIES = await window.fetchTopics();
@@ -23,43 +22,44 @@ function goToStep(step) {
 
   const form = document.getElementById(`step${step}-form`);
   if (form) form.classList.add('active');
-    // Show verification UI in step 4, store email for resend
-    if (step === 4) {
-      const emailInput = document.getElementById('email');
-      if (emailInput && emailInput.value) {
-        localStorage.setItem('pending_email', emailInput.value.trim());
-      }
-      // Update confirmation text
-      setTimeout(() => {
-        const confirmationText = document.getElementById('confirmation-text');
-        if (confirmationText) {
-          confirmationText.innerHTML = 'Письмо отправлено на ваш email. Пожалуйста, проверьте почту и перейдите по ссылке для активации аккаунта.';
-        }
-        const resendBtn = document.getElementById('resend-verification-btn');
-        const statusDiv = document.getElementById('verify-status');
-        if (resendBtn) {
-          resendBtn.onclick = async () => {
-            const email = localStorage.getItem('pending_email') || '';
-            if (!email) {
-              statusDiv.textContent = 'Email не найден. Зарегистрируйтесь заново.';
-              statusDiv.style.color = '#ef4444';
-              return;
-            }
-            resendBtn.disabled = true;
-            statusDiv.textContent = '';
-            try {
-              await api.request('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
-              statusDiv.textContent = 'Письмо отправлено!';
-              statusDiv.style.color = '#10b981';
-            } catch (e) {
-              statusDiv.textContent = e.message || 'Ошибка отправки.';
-              statusDiv.style.color = '#ef4444';
-            }
-            setTimeout(() => { resendBtn.disabled = false; }, 3000);
-          };
-        }
-      }, 200);
+  if (step === 4) {
+    const emailInput = document.getElementById('email');
+    if (emailInput && emailInput.value) {
+      localStorage.setItem('pending_email', emailInput.value.trim());
     }
+    setTimeout(() => {
+      const resendBtn = document.getElementById('resend-verification-btn');
+      const statusDiv = document.getElementById('verify-status');
+      if (resendBtn) {
+        resendBtn.onclick = async () => {
+          const email = localStorage.getItem('pending_email') || '';
+          if (!email) {
+            statusDiv.textContent = 'Email не найден. Зарегистрируйтесь заново.';
+            statusDiv.style.color = '#ef4444';
+            return;
+          }
+          resendBtn.disabled = true;
+          statusDiv.textContent = '';
+          try {
+            const registration = readPendingSignupPayload();
+            if (!registration || registration.email !== email) {
+              throw new Error('Данные регистрации не найдены. Зарегистрируйтесь заново.');
+            }
+            await api.request('/api/auth/resend-verification', {
+              method: 'POST',
+              body: JSON.stringify({ registration })
+            });
+            statusDiv.textContent = 'Письмо отправлено!';
+            statusDiv.style.color = '#10b981';
+          } catch (e) {
+            statusDiv.textContent = e.message || 'Ошибка отправки.';
+            statusDiv.style.color = '#ef4444';
+          }
+          setTimeout(() => { resendBtn.disabled = false; }, 3000);
+        };
+      }
+    }, 200);
+  }
   currentStep = step;
 }
 
@@ -88,6 +88,8 @@ function setupEventListeners() {
   if (prev3) prev3.addEventListener('click', () => goToStep(2));
   const next3 = document.getElementById('next-step-3');
   if (next3) next3.addEventListener('click', validateStep3);
+  const confirmCodeBtn = document.getElementById('confirm-code-btn');
+  if (confirmCodeBtn) confirmCodeBtn.addEventListener('click', submitConfirmationCode);
 
   const goLogin = document.getElementById('go-to-login');
   if (goLogin) goLogin.addEventListener('click', () => (window.location.href = 'login.html'));
@@ -325,15 +327,33 @@ async function validateStep1() {
 
   if (!isValid) return;
 
-  const emailAvailable = await checkEmailImmediately(email);
-  if (!emailAvailable) {
-    showError('email-error', 'Этот email уже зарегистрирован');
+  const precheck = await api.request('/api/auth/precheck-signup', {
+    method: 'POST',
+    body: JSON.stringify({ email, username })
+  }).catch(error => {
+    console.error('Ошибка пред-проверки регистрации:', error);
+    return null;
+  });
+
+  if (!precheck) {
+    showNotification('Не удалось проверить email и никнейм. Попробуйте еще раз.', 'error');
     return;
   }
 
-  const usernameAvailable = await checkUsernameImmediately(username);
-  if (!usernameAvailable) {
+  if (!precheck.emailAvailable) {
+    showError('email-error', 'Этот email уже зарегистрирован');
+    showNotification('Этот email уже зарегистрирован', 'error');
+    return;
+  }
+  if (!precheck.domainExists) {
+    showError('email-error', 'Введите действительный email');
+    showNotification('У вас неверный email', 'error');
+    return;
+  }
+
+  if (!precheck.usernameAvailable) {
     showError('username-error', 'Этот никнейм уже занят');
+    showNotification('Этот никнейм уже занят', 'error');
     return;
   }
 
@@ -370,20 +390,7 @@ async function validateStep3() {
   const selectedCategories = Array.from(document.querySelectorAll('.category-checkbox:checked')).map(cb => cb.value);
 
   try {
-    // Signup (creates session cookie)
-    await fetch('/api/auth/signup', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: typeof api?.buildHeaders === 'function'
-        ? api.buildHeaders({ method: 'POST', body: JSON.stringify({ email, password, username, full_name: fullName }) })
-        : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, username, full_name: fullName })
-    }).then(async r => {
-      const payload = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(payload?.error || `API error: ${r.status}`);
-      return payload;
-    });
-    // Upload avatar (optional)
+    // Upload avatar (optional) to a temporary public location; the real profile is created only after email confirmation.
     let photoUrl = 'user';
     if (avatarFile) {
       const compressedAvatar = typeof window.compressImageFile === 'function'
@@ -391,7 +398,7 @@ async function validateStep3() {
         : avatarFile;
       const form = new FormData();
       form.append('file', compressedAvatar);
-      const payload = await fetch('/api/upload/avatar', {
+      const payload = await fetch('/api/auth/upload-avatar', {
         method: 'POST',
         credentials: 'same-origin',
         headers: typeof api?.buildHeaders === 'function' ? api.buildHeaders({ method: 'POST', body: form }) : {},
@@ -404,49 +411,42 @@ async function validateStep3() {
         });
       photoUrl = payload?.url || 'user';
     }
-    // Complete profile
-    await fetch('/api/users/profile', {
-      method: 'PUT',
+    const signupRequestBody = {
+      email,
+      password,
+      username,
+      full_name: fullName,
+      age: String(age),
+      sex: gender,
+      location: city,
+      photo_url: photoUrl,
+      interests: selectedCategories,
+      about,
+      role: 'user',
+      blocked_users: []
+    };
+
+    const signupPayload = await fetch('/api/auth/signup', {
+      method: 'POST',
       credentials: 'same-origin',
       headers: typeof api?.buildHeaders === 'function'
-        ? api.buildHeaders({ method: 'PUT', body: JSON.stringify({
-          username,
-          full_name: fullName,
-          age: String(age),
-          sex: gender,
-          location: city,
-          photo_URL: photoUrl,
-          interests: selectedCategories,
-          about,
-          role: 'user',
-          blocked_users: []
-        }) })
+        ? api.buildHeaders({ method: 'POST', body: JSON.stringify(signupRequestBody) })
         : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        password,
-        username,
-        full_name: fullName,
-        age: String(age),
-        sex: gender,
-        location: city,
-        photo_url: photoUrl,
-        interests: selectedCategories,
-        about,
-        role: 'user',
-        blocked_users: []
-      })
+      body: JSON.stringify(signupRequestBody)
     }).then(async r => {
       const payload = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(payload?.error || `API error: ${r.status}`);
       return payload;
     });
 
+    localStorage.setItem(PENDING_SIGNUP_STORAGE_KEY, JSON.stringify(signupRequestBody));
+    localStorage.setItem('pending_email', email);
+
     const confirmationText = document.getElementById('confirmation-text');
     if (confirmationText) {
       confirmationText.textContent = signupPayload?.delivery === 'log'
-        ? 'Аккаунт создан. Автоматическая отправка письма пока не настроена, поэтому ссылка подтверждения выведена в логах сервера.'
-        : 'Мы отправили письмо с подтверждением на ваш email. Проверьте почту и перейдите по ссылке, чтобы активировать аккаунт.';
+        ? 'Регистрация почти завершена. Автоматическая отправка письма пока не настроена, поэтому код подтверждения выведен в логах сервера.'
+        : 'Мы отправили код подтверждения на ваш email. Введите его ниже, чтобы активировать аккаунт.';
     }
     goToStep(4);
   } catch (error) {
@@ -496,8 +496,11 @@ async function checkUsername() {
 
 async function checkUsernameImmediately(username) {
   try {
-    const items = await api.get(TABLES.profiles, { username });
-    return !items || items.length === 0;
+    const result = await api.request('/api/auth/precheck-signup', {
+      method: 'POST',
+      body: JSON.stringify({ username })
+    });
+    return !!result?.usernameAvailable;
   } catch (error) {
     console.error('Ошибка проверки никнейма:', error);
     return true;
@@ -507,12 +510,73 @@ async function checkUsernameImmediately(username) {
 async function checkEmailImmediately(email) {
   try {
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    if (!normalizedEmail) return false;
-    const items = await api.get(TABLES.profiles, { email: normalizedEmail });
-    return !items || items.length === 0;
+    if (!normalizedEmail) return { available: false, domainExists: false };
+    const result = await api.request('/api/auth/precheck-signup', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedEmail })
+    });
+    return {
+      available: !!result?.emailAvailable,
+      domainExists: !!result?.domainExists
+    };
   } catch (error) {
     console.error('Ошибка проверки email:', error);
-    return true;
+    return { available: true, domainExists: true };
+  }
+}
+
+function readPendingSignupPayload() {
+  try {
+    const raw = localStorage.getItem(PENDING_SIGNUP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function submitConfirmationCode() {
+  const registration = readPendingSignupPayload();
+  const codeInput = document.getElementById('confirmation-code');
+  const codeError = document.getElementById('confirmation-code-error');
+  const button = document.getElementById('confirm-code-btn');
+  const code = codeInput ? codeInput.value.trim() : '';
+
+  if (codeError) codeError.textContent = '';
+
+  if (!registration?.email) {
+    showNotification('Данные регистрации не найдены. Зарегистрируйтесь заново.', 'error');
+    return;
+  }
+  if (!/^\d{6}$/.test(code)) {
+    if (codeError) codeError.textContent = 'Введите 6-значный код';
+    showNotification('Введите 6-значный код', 'error');
+    return;
+  }
+
+  const originalText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Подтверждаем...';
+  }
+
+  try {
+    await api.request('/api/auth/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ email: registration.email, code })
+    });
+    localStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
+    localStorage.removeItem('pending_email');
+    window.location.href = 'login.html?confirmed=true';
+  } catch (error) {
+    if (codeError) codeError.textContent = error.message || 'Неверный код';
+    showNotification(error.message || 'Неверный код подтверждения', 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 }
 

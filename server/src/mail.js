@@ -142,17 +142,19 @@ async function sendEmail(message) {
   return { delivered: false, transport: 'log' };
 }
 
-function buildEmailConfirmationMessage({ to, fullName, confirmUrl }) {
+function buildEmailConfirmationMessage({ to, fullName, confirmationCode }) {
   const safeName = escapeHtml(fullName || 'there');
-  const safeUrl = escapeHtml(confirmUrl);
+  const safeCode = escapeHtml(confirmationCode || '');
   return {
     to,
-    subject: 'Confirm your Pulse email',
+    subject: 'Your Pulse confirmation code',
     text: [
       `Hi ${fullName || 'there'},`,
       '',
-      'Please confirm your email to activate your Pulse account:',
-      confirmUrl,
+      'Use this code to confirm your Pulse email:',
+      confirmationCode,
+      '',
+      'Enter this code in the app to finish registration.',
       '',
       'If you did not create this account, you can ignore this email.'
     ].join('\n'),
@@ -160,13 +162,11 @@ function buildEmailConfirmationMessage({ to, fullName, confirmUrl }) {
       <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">
         <h2 style="margin-bottom:16px">Confirm your email</h2>
         <p>Hi ${safeName},</p>
-        <p>Please confirm your email to activate your Pulse account.</p>
-        <p>
-          <a href="${safeUrl}" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">
-            Confirm email
-          </a>
-        </p>
-        <p style="word-break:break-all">If the button does not work, open this link:<br>${safeUrl}</p>
+        <p>Use this code to activate your Pulse account:</p>
+        <div style="margin:20px 0;padding:14px 18px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;font-size:28px;font-weight:800;letter-spacing:0.18em;text-align:center;color:#1d4ed8">
+          ${safeCode}
+        </div>
+        <p>Enter this code in the app to finish registration.</p>
         <p>If you did not create this account, you can ignore this email.</p>
       </div>
     `

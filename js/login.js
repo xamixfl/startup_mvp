@@ -14,14 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function handleUrlState(urlParams) {
-  const confirmToken = urlParams.get('confirm_token');
   const confirmed = urlParams.get('confirmed') === 'true';
   const resetDone = urlParams.get('reset') === 'success';
-
-  if (confirmToken) {
-    await confirmEmail(confirmToken);
-    return;
-  }
 
   if (confirmed) {
     showBanner('Аккаунт подтвержден. Теперь вы можете войти.', 'success');
@@ -127,22 +121,6 @@ async function handleResetRequest(event) {
   }
 }
 
-async function confirmEmail(token) {
-  showBanner('Подтверждаем email...', 'success');
-  try {
-    await api.request('/api/auth/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ token })
-    });
-    const nextUrl = new URL(window.location.href);
-    nextUrl.searchParams.delete('confirm_token');
-    nextUrl.searchParams.set('confirmed', 'true');
-    window.location.replace(nextUrl.toString());
-  } catch (error) {
-    showBanner('Ссылка подтверждения недействительна или устарела.', 'error');
-  }
-}
-
 function showBanner(message, type) {
   const el = document.getElementById('success-message');
   if (!el) return;
@@ -154,14 +132,14 @@ function showBanner(message, type) {
 }
 
 function showResetMode() {
-  toggleAuthMode(true);
+  toggleAuthMode('reset');
 }
 
 function showLoginMode() {
-  toggleAuthMode(false);
+  toggleAuthMode('login');
 }
   
-function toggleAuthMode(isResetMode) {
+function toggleAuthMode(mode) {
   const pageTitle = document.querySelector('.page-title');
   const loginForm = document.getElementById('login-form');
   const resetForm = document.getElementById('reset-request-form');
@@ -170,11 +148,11 @@ function toggleAuthMode(isResetMode) {
   const links = document.getElementById('login-links');
 
   if (pageTitle) {
-    pageTitle.textContent = isResetMode ? 'Сброс пароля' : 'Вход в аккаунт';
+    pageTitle.textContent = mode === 'reset' ? 'Сброс пароля' : 'Вход в аккаунт';
   }
-  if (loginForm) loginForm.style.display = isResetMode ? 'none' : '';
-  if (resetForm) resetForm.style.display = isResetMode ? 'block' : 'none';
-  if (divider) divider.style.display = isResetMode ? 'none' : '';
-  if (googleButton) googleButton.style.display = isResetMode ? 'none' : '';
-  if (links) links.style.display = isResetMode ? 'none' : '';
+  if (loginForm) loginForm.style.display = mode === 'login' ? '' : 'none';
+  if (resetForm) resetForm.style.display = mode === 'reset' ? 'block' : 'none';
+  if (divider) divider.style.display = mode === 'login' ? '' : 'none';
+  if (googleButton) googleButton.style.display = mode === 'login' ? '' : 'none';
+  if (links) links.style.display = mode === 'login' ? '' : 'none';
 }
