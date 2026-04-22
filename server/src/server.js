@@ -59,9 +59,11 @@ const loginRateLimitState = new Map();
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const PENDING_SIGNUP_TTL_MS = Number(process.env.PENDING_REGISTRATION_TTL_MS || (24 * 60 * 60 * 1000));
+const VERIFICATION_EMAIL_COOLDOWN_MS = Number(process.env.VERIFICATION_EMAIL_COOLDOWN_MS || 60 * 1000);
 const CSRF_COOKIE_NAME = process.env.CSRF_COOKIE_NAME || 'csrf_token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
 let pendingSignupsTableReady = null;
+const verificationEmailCooldownState = new Map();
 
 function shouldUseSecureCookies() {
   const raw = process.env.COOKIE_SECURE;
@@ -183,14 +185,24 @@ async function doesEmailDomainExist(email) {
   }
 }
 
-async function isUsernameAvailable(username) {
+async function isUsernameAvailable(username, options = {}) {
   const normalized = String(username || '').trim();
   if (!normalized) return false;
+  const onlyVerified = options.onlyVerified === true;
   const result = await query(
-    'SELECT 1 FROM profiles WHERE username = $1 LIMIT 1',
+    onlyVerified
+      ? `SELECT 1 FROM profiles WHERE username = $1 AND email_verified_at IS NOT NULL LIMIT 1`
+      : 'SELECT 1 FROM profiles WHERE username = $1 LIMIT 1',
     [normalized]
   );
   return (result.rows || []).length === 0;
+}
+
+async function deleteUnverifiedProfileById(userId) {
+  const normalized = String(userId || '').trim();
+  if (!normalized) return;
+  await query('DELETE FROM email_verifications WHERE user_id = $1', [normalized]);
+  await query('DELETE FROM profiles WHERE id = $1 AND email_verified_at IS NULL', [normalized]);
 }
 
 async function ensurePendingSignupsTable() {
@@ -245,6 +257,31 @@ async function findPendingSignupByEmail(email) {
   return result.rows[0] || null;
 }
 
+async function findPendingSignupByEmailAndCode(email, code) {
+  await ensurePendingSignupsTable();
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedCode = String(code || '').trim();
+  if (!normalizedEmail || !normalizedCode) return null;
+
+  const result = await query(
+    `SELECT *
+       FROM pending_signups
+      WHERE email = $1
+        AND verification_code_hash = $2
+        AND expires_at > now()
+      LIMIT 1`,
+    [normalizedEmail, hashConfirmationCode(normalizedCode)]
+  );
+  return result.rows[0] || null;
+}
+
+async function deletePendingSignupByEmail(email) {
+  await ensurePendingSignupsTable();
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return;
+  await query('DELETE FROM pending_signups WHERE email = $1', [normalized]);
+}
+
 async function isPendingUsernameReserved(username, emailToIgnore = '') {
   await ensurePendingSignupsTable();
   const normalizedUsername = String(username || '').trim();
@@ -262,10 +299,10 @@ async function isPendingUsernameReserved(username, emailToIgnore = '') {
   return (result.rows || []).length > 0;
 }
 
-async function createOrReplacePendingSignup(payload) {
+async function createOrReplacePendingSignup(payload, options = {}) {
   await ensurePendingSignupsTable();
   const confirmationCode = generateConfirmationCode();
-  const passwordHash = await bcrypt.hash(String(payload.password || ''), 10);
+  const passwordHash = options.passwordHash || await bcrypt.hash(String(payload.password || ''), 10);
   const expiresAt = new Date(Date.now() + PENDING_SIGNUP_TTL_MS).toISOString();
 
   await query(
@@ -313,23 +350,6 @@ async function createOrReplacePendingSignup(payload) {
   return { confirmationCode, expiresAt };
 }
 
-async function consumePendingSignup(email, code) {
-  await ensurePendingSignupsTable();
-  const normalizedEmail = String(email || '').trim().toLowerCase();
-  const normalizedCode = String(code || '').trim();
-  if (!normalizedEmail || !normalizedCode) return null;
-
-  const result = await query(
-    `DELETE FROM pending_signups
-      WHERE email = $1
-        AND verification_code_hash = $2
-        AND expires_at > now()
-      RETURNING *`,
-    [normalizedEmail, hashConfirmationCode(normalizedCode)]
-  );
-  return result.rows[0] || null;
-}
-
 function enforceLoginRateLimit(req, res, next) {
   pruneExpiredLoginRateLimitEntries();
   const key = getLoginRateLimitKey(req);
@@ -361,6 +381,36 @@ function registerFailedLoginAttempt(key) {
 function clearLoginRateLimit(key) {
   if (!key) return;
   loginRateLimitState.delete(key);
+}
+
+function getVerificationEmailCooldownRemainingMs(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return 0;
+  const expiresAt = verificationEmailCooldownState.get(normalized) || 0;
+  const remaining = expiresAt - Date.now();
+  if (remaining <= 0) {
+    verificationEmailCooldownState.delete(normalized);
+    return 0;
+  }
+  return remaining;
+}
+
+function markVerificationEmailSent(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return;
+  verificationEmailCooldownState.set(normalized, Date.now() + VERIFICATION_EMAIL_COOLDOWN_MS);
+}
+
+function buildVerificationCooldownResponse(email) {
+  const remainingMs = getVerificationEmailCooldownRemainingMs(email);
+  const retryAfterSec = Math.max(1, Math.ceil(remainingMs / 1000));
+  return {
+    status: 429,
+    payload: {
+      error: `Повторная отправка будет доступна через ${retryAfterSec} сек.`,
+      retry_after_seconds: retryAfterSec
+    }
+  };
 }
 
 async function tableHasColumn(tableName, columnName) {
@@ -1634,7 +1684,7 @@ app.post('/api/auth/precheck-signup', async (req, res) => {
       if (username.length < 3 || !/^[a-zA-Z0-9_]+$/.test(username)) {
         return res.status(400).json({ error: 'Введите корректный никнейм' });
       }
-      checks.push(isUsernameAvailable(username));
+      checks.push(isUsernameAvailable(username, { onlyVerified: true }));
       checks.push(isPendingUsernameReserved(username, email));
     } else {
       checks.push(Promise.resolve(null));
@@ -1642,12 +1692,11 @@ app.post('/api/auth/precheck-signup', async (req, res) => {
     }
 
     const [domainExists, emailProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all(checks);
-    const pendingSignup = email ? await findPendingSignupByEmail(email) : null;
 
     return res.json({
       ok: true,
       domainExists: email ? !!domainExists : null,
-      emailAvailable: email ? (!emailProfile && !pendingSignup) : null,
+      emailAvailable: email ? !(emailProfile && emailProfile.email_verified_at) : null,
       usernameAvailable: username ? (!!usernameAvailable && !pendingUsernameReserved) : null
     });
   } catch (e) {
@@ -1664,22 +1713,24 @@ app.post('/api/auth/signup', async (req, res) => {
     const [domainExists, existingProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all([
       doesEmailDomainExist(payload.email),
       findProfileByEmail(payload.email),
-      isUsernameAvailable(payload.username),
+      isUsernameAvailable(payload.username, { onlyVerified: true }),
       isPendingUsernameReserved(payload.username, payload.email)
     ]);
-    const existingPendingSignup = await findPendingSignupByEmail(payload.email);
-
     if (!domainExists) {
       return res.status(400).json({ error: 'Введите действительный email' });
     }
-    if (existingProfile) {
+    if (existingProfile?.email_verified_at) {
       return res.status(409).json({ error: 'Email already registered' });
     }
-    if (existingPendingSignup) {
-      return res.status(409).json({ error: 'Код подтверждения уже отправлен на этот email' });
+    if (existingProfile && !existingProfile.email_verified_at) {
+      await deleteUnverifiedProfileById(existingProfile.id);
     }
     if (!usernameAvailable || pendingUsernameReserved) {
       return res.status(409).json({ error: 'Username already taken' });
+    }
+    if (getVerificationEmailCooldownRemainingMs(payload.email) > 0) {
+      const cooldown = buildVerificationCooldownResponse(payload.email);
+      return res.status(cooldown.status).json(cooldown.payload);
     }
 
     const verification = await createOrReplacePendingSignup(payload);
@@ -1688,11 +1739,13 @@ app.post('/api/auth/signup', async (req, res) => {
       fullName: payload.full_name,
       confirmationCode: verification.confirmationCode
     }));
+    markVerificationEmailSent(payload.email);
 
     return res.status(201).json({
       ok: true,
       requires_email_confirmation: true,
-      delivery: mailResult.transport
+      delivery: mailResult.transport,
+      retry_after_seconds: Math.ceil(VERIFICATION_EMAIL_COOLDOWN_MS / 1000)
     });
   } catch (e) {
     // Unique email constraint
@@ -1753,7 +1806,15 @@ app.post('/api/auth/confirm', async (req, res) => {
     const code = String(req.body?.code || '').trim();
 
     if (email && code) {
-      const pendingSignup = await consumePendingSignup(email, code);
+      const profile = await findProfileByEmail(email);
+      if (profile && !profile.email_verified_at) {
+        const userId = await consumeEmailVerification(profile.id, code);
+        if (!userId) return res.status(400).json({ error: 'Неверный или просроченный код подтверждения' });
+        await markEmailVerified(userId);
+        return res.json({ ok: true });
+      }
+
+      const pendingSignup = await findPendingSignupByEmailAndCode(email, code);
       if (!pendingSignup) {
         return res.status(400).json({ error: 'Неверный или просроченный код подтверждения' });
       }
@@ -1761,21 +1822,24 @@ app.post('/api/auth/confirm', async (req, res) => {
       const [domainExists, existingProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all([
         doesEmailDomainExist(pendingSignup.email),
         findProfileByEmail(pendingSignup.email),
-        isUsernameAvailable(pendingSignup.username),
+        isUsernameAvailable(pendingSignup.username, { onlyVerified: true }),
         isPendingUsernameReserved(pendingSignup.username, pendingSignup.email)
       ]);
 
       if (!domainExists) {
         return res.status(400).json({ error: 'Введите действительный email' });
       }
-      if (existingProfile) {
+      if (existingProfile?.email_verified_at) {
         return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
+      }
+      if (existingProfile && !existingProfile.email_verified_at) {
+        await deleteUnverifiedProfileById(existingProfile.id);
       }
       if (!usernameAvailable || pendingUsernameReserved) {
         return res.status(409).json({ error: 'Этот никнейм уже занят' });
       }
 
-      await createProfileUser(pendingSignup.email, '', {
+      const createdProfile = await createProfileUser(pendingSignup.email, '', {
         password_hash: pendingSignup.password_hash,
         username: pendingSignup.username,
         full_name: pendingSignup.full_name,
@@ -1789,17 +1853,8 @@ app.post('/api/auth/confirm', async (req, res) => {
         blocked_users: Array.isArray(pendingSignup.blocked_users) ? pendingSignup.blocked_users : [],
         email_verified_at: new Date().toISOString()
       });
-      return res.json({ ok: true });
-    }
-
-    if (email && code) {
-      const profile = await findProfileByEmail(email);
-      if (profile && !profile.email_verified_at) {
-        const userId = await consumeEmailVerification(profile.id, code);
-        if (!userId) return res.status(400).json({ error: 'Неверный или просроченный код подтверждения' });
-        await markEmailVerified(userId);
-        return res.json({ ok: true });
-      }
+      await deletePendingSignupByEmail(pendingSignup.email);
+      return res.json({ ok: true, user: createdProfile });
     }
 
     const token = String(req.body?.token || '').trim();
@@ -1823,18 +1878,25 @@ app.post('/api/auth/resend-verification', async (req, res) => {
       const [domainExists, existingProfile, usernameAvailable, pendingUsernameReserved] = await Promise.all([
         doesEmailDomainExist(payload.email),
         findProfileByEmail(payload.email),
-        isUsernameAvailable(payload.username),
+        isUsernameAvailable(payload.username, { onlyVerified: true }),
         isPendingUsernameReserved(payload.username, payload.email)
       ]);
 
       if (!domainExists) {
         return res.status(400).json({ error: 'Введите действительный email' });
       }
-      if (existingProfile) {
+      if (existingProfile?.email_verified_at) {
         return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
+      }
+      if (existingProfile && !existingProfile.email_verified_at) {
+        await deleteUnverifiedProfileById(existingProfile.id);
       }
       if (!usernameAvailable || pendingUsernameReserved) {
         return res.status(409).json({ error: 'Этот никнейм уже занят' });
+      }
+      if (getVerificationEmailCooldownRemainingMs(payload.email) > 0) {
+        const cooldown = buildVerificationCooldownResponse(payload.email);
+        return res.status(cooldown.status).json(cooldown.payload);
       }
 
       const verification = await createOrReplacePendingSignup(payload);
@@ -1843,10 +1905,12 @@ app.post('/api/auth/resend-verification', async (req, res) => {
         fullName: payload.full_name,
         confirmationCode: verification.confirmationCode
       }));
+      markVerificationEmailSent(payload.email);
 
       return res.json({
         ok: true,
-        message: 'Verification email resent'
+        message: 'Verification email resent',
+        retry_after_seconds: Math.ceil(VERIFICATION_EMAIL_COOLDOWN_MS / 1000)
       });
     }
 
@@ -1855,9 +1919,13 @@ app.post('/api/auth/resend-verification', async (req, res) => {
 
     const pendingSignup = await findPendingSignupByEmail(email);
     if (pendingSignup) {
+      if (getVerificationEmailCooldownRemainingMs(email) > 0) {
+        const cooldown = buildVerificationCooldownResponse(email);
+        return res.status(cooldown.status).json(cooldown.payload);
+      }
       const verification = await createOrReplacePendingSignup({
         email: pendingSignup.email,
-        password: 'placeholder123',
+        password: '',
         username: pendingSignup.username,
         full_name: pendingSignup.full_name,
         age: pendingSignup.age,
@@ -1868,29 +1936,41 @@ app.post('/api/auth/resend-verification', async (req, res) => {
         about: pendingSignup.about,
         role: pendingSignup.role,
         blocked_users: Array.isArray(pendingSignup.blocked_users) ? pendingSignup.blocked_users : []
+      }, {
+        passwordHash: pendingSignup.password_hash
       });
-      await query('UPDATE pending_signups SET password_hash = $2 WHERE email = $1', [pendingSignup.email, pendingSignup.password_hash]);
       await sendEmail(buildEmailConfirmationMessage({
         to: pendingSignup.email,
         fullName: pendingSignup.full_name,
         confirmationCode: verification.confirmationCode
       }));
-      return res.json({ ok: true, message: 'If this email exists, verification instructions were sent' });
+      markVerificationEmailSent(pendingSignup.email);
+      return res.json({
+        ok: true,
+        message: 'If this email exists, verification instructions were sent',
+        retry_after_seconds: Math.ceil(VERIFICATION_EMAIL_COOLDOWN_MS / 1000)
+      });
     }
 
     const profile = await findProfileByEmail(email);
     if (profile && !profile.email_verified_at) {
+      if (getVerificationEmailCooldownRemainingMs(email) > 0) {
+        const cooldown = buildVerificationCooldownResponse(email);
+        return res.status(cooldown.status).json(cooldown.payload);
+      }
       const verificationCode = await createEmailVerification(profile.id, profile.email);
       await sendEmail(buildEmailConfirmationMessage({
         to: profile.email,
         fullName: profile.full_name,
         confirmationCode: verificationCode
       }));
+      markVerificationEmailSent(profile.email);
     }
 
     return res.json({
       ok: true,
-      message: 'If this email exists, verification instructions were sent'
+      message: 'If this email exists, verification instructions were sent',
+      retry_after_seconds: Math.ceil(VERIFICATION_EMAIL_COOLDOWN_MS / 1000)
     });
   } catch (e) {
     return res.status(400).json({ error: e.message || 'Could not resend verification email' });

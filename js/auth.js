@@ -4,6 +4,8 @@ let usernameCheckTimeout = null;
 let categoryMenuOpen = false;
 let CATEGORIES = [];
 const PENDING_SIGNUP_STORAGE_KEY = 'pending_signup_payload';
+const RESEND_COOLDOWN_STORAGE_KEY = 'pending_signup_resend_until';
+let resendCooldownTimerId = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   CATEGORIES = await window.fetchTopics();
@@ -30,6 +32,7 @@ function goToStep(step) {
     setTimeout(() => {
       const resendBtn = document.getElementById('resend-verification-btn');
       const statusDiv = document.getElementById('verify-status');
+      syncResendCooldownUi();
       if (resendBtn) {
         resendBtn.onclick = async () => {
           const email = localStorage.getItem('pending_email') || '';
@@ -45,17 +48,20 @@ function goToStep(step) {
             if (!registration || registration.email !== email) {
               throw new Error('Данные регистрации не найдены. Зарегистрируйтесь заново.');
             }
-            await api.request('/api/auth/resend-verification', {
+            const resendPayload = await api.request('/api/auth/resend-verification', {
               method: 'POST',
               body: JSON.stringify({ registration })
             });
             statusDiv.textContent = 'Письмо отправлено!';
             statusDiv.style.color = '#10b981';
+            startResendCooldown(Number(resendPayload?.retry_after_seconds || 60));
           } catch (e) {
+            if (e?.status === 429 && Number.isFinite(Number(e?.payload?.retry_after_seconds))) {
+              startResendCooldown(Number(e.payload.retry_after_seconds));
+            }
             statusDiv.textContent = e.message || 'Ошибка отправки.';
             statusDiv.style.color = '#ef4444';
           }
-          setTimeout(() => { resendBtn.disabled = false; }, 3000);
         };
       }
     }, 200);
@@ -448,6 +454,7 @@ async function validateStep3() {
         ? 'Регистрация почти завершена. Автоматическая отправка письма пока не настроена, поэтому код подтверждения выведен в логах сервера.'
         : 'Мы отправили код подтверждения на ваш email. Введите его ниже, чтобы активировать аккаунт.';
     }
+    startResendCooldown(Number(signupPayload?.retry_after_seconds || 60));
     goToStep(4);
   } catch (error) {
     console.error('Ошибка регистрации:', error);
@@ -534,6 +541,61 @@ function readPendingSignupPayload() {
   } catch (_error) {
     return null;
   }
+}
+
+function getResendCooldownRemainingSeconds() {
+  const raw = Number(localStorage.getItem(RESEND_COOLDOWN_STORAGE_KEY) || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  const remainingMs = raw - Date.now();
+  if (remainingMs <= 0) {
+    localStorage.removeItem(RESEND_COOLDOWN_STORAGE_KEY);
+    return 0;
+  }
+  return Math.ceil(remainingMs / 1000);
+}
+
+function renderResendCooldown() {
+  const resendBtn = document.getElementById('resend-verification-btn');
+  const timerEl = document.getElementById('resend-timer');
+  const remaining = getResendCooldownRemainingSeconds();
+  if (!resendBtn) return remaining;
+
+  if (remaining > 0) {
+    resendBtn.disabled = true;
+    resendBtn.textContent = `Отправить ещё раз через ${remaining} сек`;
+    if (timerEl) timerEl.textContent = `Повторная отправка станет доступна через ${remaining} сек.`;
+  } else {
+    resendBtn.disabled = false;
+    resendBtn.textContent = 'Отправить письмо ещё раз';
+    if (timerEl) timerEl.textContent = 'Код не пришёл? Можно запросить новое письмо через минуту.';
+  }
+  return remaining;
+}
+
+function stopResendCooldownTimer() {
+  if (resendCooldownTimerId) {
+    clearInterval(resendCooldownTimerId);
+    resendCooldownTimerId = null;
+  }
+}
+
+function syncResendCooldownUi() {
+  stopResendCooldownTimer();
+  const remaining = renderResendCooldown();
+  if (remaining > 0) {
+    resendCooldownTimerId = setInterval(() => {
+      const nextRemaining = renderResendCooldown();
+      if (nextRemaining <= 0) {
+        stopResendCooldownTimer();
+      }
+    }, 1000);
+  }
+}
+
+function startResendCooldown(seconds) {
+  const duration = Math.max(1, Number(seconds || 60));
+  localStorage.setItem(RESEND_COOLDOWN_STORAGE_KEY, String(Date.now() + duration * 1000));
+  syncResendCooldownUi();
 }
 
 async function submitConfirmationCode() {
