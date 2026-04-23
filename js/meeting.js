@@ -547,7 +547,7 @@ async function requestJoin(meeting, user) {
     await renderParticipantsList(meeting, freshUser || user);
   } catch (e) {
     console.error('Ошибка отправки заявки:', e);
-    showNotification('Ошибка отправки заявки');
+    showNotification(e.message || 'Ошибка отправки заявки');
   }
 }
 
@@ -586,7 +586,7 @@ async function approveRequest(meeting, userId) {
     await renderParticipantsList(meeting, { id: meeting.creator_id });
   } catch (e) {
     console.error('Ошибка одобрения:', e);
-    showNotification('Ошибка одобрения');
+    showNotification(e.message || 'Ошибка одобрения');
   }
 }
 
@@ -612,7 +612,7 @@ async function rejectRequest(meeting, userId) {
     await setupChatState(meeting, { id: meeting.creator_id });
   } catch (e) {
     console.error('Ошибка отклонения:', e);
-    showNotification('Ошибка отклонения');
+    showNotification(e.message || 'Ошибка отклонения');
   }
 }
 

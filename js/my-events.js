@@ -246,7 +246,7 @@ async function handleNotificationDecision(notification, action, item) {
     await loadParticipationNotifications(true);
   } catch (error) {
     console.error('Ошибка обработки заявки из уведомления:', error);
-    alert(action === 'approve' ? 'Не удалось одобрить заявку' : 'Не удалось отклонить заявку');
+    alert(error.message || (action === 'approve' ? 'Не удалось одобрить заявку' : 'Не удалось отклонить заявку'));
     buttons.forEach(button => { button.disabled = false; });
   }
 }

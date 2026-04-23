@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderMeetings(profile);
   setupEditButton();
   setupReportButton();
+  setupUserBlockButton();
   setupBanButton();
 });
 
@@ -166,7 +167,7 @@ function renderProfile(profile) {
 
   const messageBtn = document.getElementById('message-btn');
   if (messageBtn) {
-    if (currentUser && profile.id && currentUser.id !== profile.id) {
+    if (currentUser && profile.id && currentUser.id !== profile.id && !isUserInteractionBlocked(profile)) {
       messageBtn.style.display = 'block';
       messageBtn.onclick = () => createDirectChat(profile);
     } else {
@@ -187,6 +188,24 @@ function renderProfile(profile) {
       interestsWrap.appendChild(pill);
     });
   }
+}
+
+function getBlockedUserIds(profile) {
+  return Array.isArray(profile?.blocked_users) ? profile.blocked_users.map(id => String(id)) : [];
+}
+
+function hasCurrentUserBlockedProfile(profile = viewedProfile) {
+  if (!currentUser?.id || !profile?.id) return false;
+  return getBlockedUserIds(currentUser).includes(String(profile.id));
+}
+
+function hasProfileBlockedCurrentUser(profile = viewedProfile) {
+  if (!currentUser?.id || !profile?.id) return false;
+  return getBlockedUserIds(profile).includes(String(currentUser.id));
+}
+
+function isUserInteractionBlocked(profile = viewedProfile) {
+  return hasCurrentUserBlockedProfile(profile) || hasProfileBlockedCurrentUser(profile);
 }
 
 async function createDirectChat(profile) {
@@ -251,7 +270,7 @@ async function createDirectChat(profile) {
     window.location.href = `chat.html?chat_id=${chat.id}`;
   } catch (error) {
     console.error('Ошибка создания личного чата:', error);
-    alert('Не удалось создать личный чат.');
+    alert(error.message || 'Не удалось создать личный чат.');
   }
 }
 
@@ -599,6 +618,65 @@ function updateBanButtonLabel(btn) {
   const isBanned = viewedProfile?.role === 'banned';
   btn.textContent = isBanned ? '✅ Разблокировать' : '🚫 Заблокировать';
   btn.classList.toggle('blocked', isBanned);
+}
+
+function setupUserBlockButton() {
+  const blockBtn = document.getElementById('user-block-btn');
+  if (!blockBtn) return;
+  if (!currentUser || !viewedProfile || currentUser.id === viewedProfile.id) {
+    blockBtn.style.display = 'none';
+    return;
+  }
+
+  blockBtn.style.display = 'block';
+  updateUserBlockButtonLabel(blockBtn);
+  blockBtn.onclick = async () => {
+    const isBlocked = hasCurrentUserBlockedProfile(viewedProfile);
+    const ok = confirm(
+      isBlocked
+        ? 'Разблокировать этого пользователя для себя?'
+        : 'Заблокировать этого пользователя для себя? После этого вы не сможете писать друг другу и участвовать во встречах друг друга.'
+    );
+    if (!ok) return;
+
+    blockBtn.disabled = true;
+    try {
+      const result = await api.request(`/api/blocks/${encodeURIComponent(viewedProfile.id)}`, {
+        method: 'POST',
+        body: JSON.stringify({ blocked: !isBlocked })
+      });
+      currentUser = result?.profile || currentUser;
+      viewedProfile = {
+        ...viewedProfile,
+        blocked_users: Array.isArray(viewedProfile?.blocked_users) ? viewedProfile.blocked_users : []
+      };
+      updateUserBlockButtonLabel(blockBtn);
+
+      const messageBtn = document.getElementById('message-btn');
+      if (messageBtn) {
+        if (isUserInteractionBlocked(viewedProfile)) {
+          messageBtn.style.display = 'none';
+        } else {
+          messageBtn.style.display = 'block';
+          messageBtn.onclick = () => createDirectChat(viewedProfile);
+        }
+      }
+
+      alert(!isBlocked ? 'Пользователь заблокирован только для вас' : 'Пользователь разблокирован');
+    } catch (error) {
+      console.error('User block update error:', error);
+      alert(error.message || 'Не удалось изменить настройку блокировки');
+    } finally {
+      blockBtn.disabled = false;
+    }
+  };
+}
+
+function updateUserBlockButtonLabel(btn) {
+  if (!btn) return;
+  const isBlocked = hasCurrentUserBlockedProfile(viewedProfile);
+  btn.textContent = isBlocked ? '✅ Разблокировать для себя' : '🚫 Заблокировать для себя';
+  btn.classList.toggle('blocked', isBlocked);
 }
 
 function openEditModal() {

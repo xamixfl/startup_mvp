@@ -696,7 +696,7 @@ async function joinMeeting(meetingId) {
         return;
       } catch (e) {
         console.error('Ошибка отправки заявки:', e);
-        showNotification('Ошибка при записи на встречу', 'error');
+        showNotification(e.message || 'Ошибка при записи на встречу', 'error');
         return;
       }
     }
@@ -747,7 +747,7 @@ async function joinMeeting(meetingId) {
     loadMeetings();
   } catch (error) {
     console.error('Ошибка записи:', error);
-    showNotification('Ошибка при записи на встречу', 'error');
+    showNotification(error.message || 'Ошибка при записи на встречу', 'error');
   }
 }
 
@@ -1009,4 +1009,3 @@ function renderMeetingResult(meeting) {
   `;
   return item;
 }
-

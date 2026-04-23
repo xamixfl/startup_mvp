@@ -478,6 +478,175 @@ function getProfileDisplayNameServer(profile, fallback = 'Пользовател
   return profile?.full_name || profile?.username || profile?.email || fallback;
 }
 
+function normalizeUserId(value) {
+  return String(value || '').trim();
+}
+
+function normalizeBlockedUsers(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map(item => normalizeUserId(item)).filter(Boolean)));
+}
+
+async function getNormalizedProfileById(userId) {
+  const normalizedId = normalizeUserId(userId);
+  if (!normalizedId) return null;
+  const rows = await selectRows('profiles', { id: normalizedId, $limit: 1 });
+  return normalizeProfilesRows(rows || [])[0] || null;
+}
+
+async function getUserBlockState(userId, otherUserId) {
+  const selfId = normalizeUserId(userId);
+  const peerId = normalizeUserId(otherUserId);
+  if (!selfId || !peerId || selfId === peerId) {
+    return {
+      blockedByCurrentUser: false,
+      blockedCurrentUser: false,
+      eitherBlocked: false,
+      currentProfile: null,
+      otherProfile: null
+    };
+  }
+
+  const [currentProfile, otherProfile] = await Promise.all([
+    getNormalizedProfileById(selfId),
+    getNormalizedProfileById(peerId)
+  ]);
+
+  const currentBlockedUsers = normalizeBlockedUsers(currentProfile?.blocked_users);
+  const otherBlockedUsers = normalizeBlockedUsers(otherProfile?.blocked_users);
+  const blockedByCurrentUser = currentBlockedUsers.includes(peerId);
+  const blockedCurrentUser = otherBlockedUsers.includes(selfId);
+
+  return {
+    blockedByCurrentUser,
+    blockedCurrentUser,
+    eitherBlocked: blockedByCurrentUser || blockedCurrentUser,
+    currentProfile,
+    otherProfile
+  };
+}
+
+async function assertUsersCanInteract(userId, otherUserId, message = 'Вы не можете взаимодействовать с этим пользователем') {
+  const state = await getUserBlockState(userId, otherUserId);
+  if (state.eitherBlocked) {
+    throw createHttpError(message, 403);
+  }
+  return state;
+}
+
+async function resolveDirectChatPeerId(chat, userId) {
+  if (!chat) return '';
+  const normalizedUserId = normalizeUserId(userId);
+  const ownerId = normalizeUserId(chat.owner_id);
+  const peerId = normalizeUserId(chat.peer_id);
+
+  if (peerId) {
+    if (normalizedUserId && ownerId === normalizedUserId) return peerId;
+    if (normalizedUserId && peerId === normalizedUserId) return ownerId;
+    return peerId;
+  }
+
+  const hasStatus = await tableHasColumn('chat_members', 'status');
+  const membershipWhere = hasStatus ? ` AND status = 'approved'` : '';
+  const result = await query(
+    `SELECT user_id
+       FROM chat_members
+      WHERE chat_id = $1${membershipWhere}`,
+    [chat.id]
+  );
+  const memberIds = Array.from(new Set((result.rows || []).map(row => normalizeUserId(row.user_id)).filter(Boolean)));
+  if (!normalizedUserId) return memberIds[0] || ownerId || '';
+  return memberIds.find(memberId => memberId !== normalizedUserId) || ownerId || '';
+}
+
+async function assertChatInteractionAllowed(chatId, userId) {
+  const chat = await getChatRecord(chatId);
+  if (!chat) throw createHttpError('Chat not found', 404);
+
+  if (chat.meeting_id) {
+    const meeting = await getMeetingRecord(chat.meeting_id);
+    if (!meeting) throw createHttpError('Meeting not found', 404);
+    if (normalizeUserId(meeting.creator_id) && normalizeUserId(meeting.creator_id) !== normalizeUserId(userId)) {
+      await assertUsersCanInteract(userId, meeting.creator_id, 'Вы не можете писать в этот чат');
+    }
+    return { chat, meeting };
+  }
+
+  const peerId = await resolveDirectChatPeerId(chat, userId);
+  if (peerId) {
+    await assertUsersCanInteract(userId, peerId, 'Личный чат недоступен');
+  }
+  return { chat, meeting: null };
+}
+
+async function assertMeetingParticipationAllowed(meetingId, userId) {
+  const meeting = await getMeetingRecord(meetingId);
+  if (!meeting) throw createHttpError('Meeting not found', 404);
+  const creatorId = normalizeUserId(meeting.creator_id);
+  const normalizedUserId = normalizeUserId(userId);
+  if (creatorId && creatorId !== normalizedUserId) {
+    await assertUsersCanInteract(normalizedUserId, creatorId, 'Вы не можете участвовать во встречах друг друга');
+  }
+  return meeting;
+}
+
+async function removeUserFromOwnedMeetings(ownerId, removedUserId) {
+  const normalizedOwnerId = normalizeUserId(ownerId);
+  const normalizedRemovedUserId = normalizeUserId(removedUserId);
+  if (!normalizedOwnerId || !normalizedRemovedUserId || normalizedOwnerId === normalizedRemovedUserId) return;
+
+  const meetings = await selectRows('meetings', { creator_id: normalizedOwnerId });
+  const hasStatus = await tableHasColumn('chat_members', 'status');
+
+  for (const meeting of meetings || []) {
+    if (!meeting?.id) continue;
+
+    let occupiedSlotRemoved = false;
+    try {
+      const participantRows = await deleteWhere('table-connector', {
+        meeting_id: meeting.id,
+        user_id: normalizedRemovedUserId
+      });
+      if (Array.isArray(participantRows) && participantRows.length > 0) {
+        occupiedSlotRemoved = true;
+      }
+    } catch (_e) {}
+
+    if (meeting.chat_id) {
+      try {
+        const memberRows = await selectRows('chat_members', {
+          chat_id: meeting.chat_id,
+          user_id: normalizedRemovedUserId
+        });
+        const removedApprovedMember = (memberRows || []).some(row => !hasStatus || row.status === 'approved');
+        if (!occupiedSlotRemoved && removedApprovedMember) {
+          occupiedSlotRemoved = true;
+        }
+        if ((memberRows || []).length > 0) {
+          await deleteWhere('chat_members', {
+            chat_id: meeting.chat_id,
+            user_id: normalizedRemovedUserId
+          });
+        }
+      } catch (_e) {}
+    }
+
+    if (occupiedSlotRemoved) {
+      try {
+        await updateRow('meetings', {
+          id: meeting.id,
+          current_slots: Math.max(0, Number(meeting.current_slots || 0) - 1)
+        });
+      } catch (_e) {}
+    }
+  }
+}
+
+async function applyUserBlockConsequences(userId, blockedUserId) {
+  await removeUserFromOwnedMeetings(userId, blockedUserId);
+  await removeUserFromOwnedMeetings(blockedUserId, userId);
+}
+
 function parseJoinRequesterNameServer(message) {
   const text = String(message || '');
   const marker = ' хочет присоединиться';
@@ -810,6 +979,7 @@ async function authorizeQueryOperation(req, table, action, data, filters) {
       if (!isAdmin(req) && userId !== String(req.user.id) && !(await canManageMeeting(req, meetingId))) {
         throw createHttpError('Forbidden', 403);
       }
+      await assertMeetingParticipationAllowed(meetingId, userId);
       return { data: { ...normalizedData, user_id: userId }, filters: normalizedFilters };
     }
     if (action === 'delete') {
@@ -858,6 +1028,14 @@ async function authorizeQueryOperation(req, table, action, data, filters) {
       if (meetingId && !isAdmin(req) && !(await canManageMeeting(req, meetingId))) {
         throw createHttpError('Forbidden', 403);
       }
+      if (!meetingId) {
+        const peerId = normalizeUserId(normalizedData?.peer_id);
+        if (!peerId) throw createHttpError('Missing peer_id', 400);
+        if (peerId === String(req.user.id)) {
+          throw createHttpError('Cannot create direct chat with yourself', 400);
+        }
+        await assertUsersCanInteract(req.user.id, peerId, 'Личный чат недоступен');
+      }
       return { data: { ...normalizedData, owner_id: req.user.id }, filters: normalizedFilters };
     }
     if (action === 'update') {
@@ -903,6 +1081,16 @@ async function authorizeQueryOperation(req, table, action, data, filters) {
       if (!isAdmin(req) && userId !== String(req.user.id) && !canManage) {
         throw createHttpError('Forbidden', 403);
       }
+      const chat = await getChatRecord(chatId);
+      if (!chat) throw createHttpError('Chat not found', 404);
+      if (chat.meeting_id) {
+        await assertMeetingParticipationAllowed(chat.meeting_id, userId);
+      } else {
+        const peerId = await resolveDirectChatPeerId(chat, userId);
+        if (peerId) {
+          await assertUsersCanInteract(userId, peerId, 'Личный чат недоступен');
+        }
+      }
       return { data: { ...normalizedData, user_id: userId }, filters: normalizedFilters };
     }
     if (action === 'update') {
@@ -913,6 +1101,12 @@ async function authorizeQueryOperation(req, table, action, data, filters) {
       if (!row) throw createHttpError('Not found', 404);
       if (!isAdmin(req) && String(row.user_id || '') !== String(req.user.id) && !(await canManageChat(req, row.chat_id))) {
         throw createHttpError('Forbidden', 403);
+      }
+      if (normalizedData?.status === 'approved') {
+        const chat = await getChatRecord(row.chat_id);
+        if (chat?.meeting_id) {
+          await assertMeetingParticipationAllowed(chat.meeting_id, row.user_id);
+        }
       }
     }
     if (action === 'deleteWhere') {
@@ -939,6 +1133,7 @@ async function authorizeQueryOperation(req, table, action, data, filters) {
       const chatId = String(normalizedData?.chat_id || '');
       if (!chatId) throw createHttpError('Missing chat_id', 400);
       await assertChatAccess(req, [chatId]);
+      await assertChatInteractionAllowed(chatId, req.user.id);
       return { data: { ...normalizedData, user_id: req.user.id }, filters: normalizedFilters };
     }
     if (action === 'deleteWhere') {
@@ -1204,6 +1399,8 @@ app.get('/api/chats/direct-candidate/:peerId', requireAuth, async (req, res) => 
       return res.status(400).json({ error: 'Cannot create direct chat with yourself' });
     }
 
+    await assertUsersCanInteract(currentUserId, peerId, 'Личный чат недоступен');
+
     const result = await query(
       `SELECT *
          FROM chats
@@ -1220,7 +1417,7 @@ app.get('/api/chats/direct-candidate/:peerId', requireAuth, async (req, res) => 
 
     return res.json((result.rows || [])[0] || null);
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Failed to find direct chat candidate' });
+    return res.status(e.statusCode || 500).json({ error: e.message || 'Failed to find direct chat candidate' });
   }
 });
 
@@ -1286,6 +1483,80 @@ app.get('/api/profiles/:userId', async (req, res) => {
     return res.json(normalized[0] || null);
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed' });
+  }
+});
+
+app.get('/api/blocks/:otherUserId/status', requireAuth, async (req, res) => {
+  try {
+    const otherUserId = normalizeUserId(req.params.otherUserId);
+    if (!otherUserId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+    if (otherUserId === normalizeUserId(req.user.id)) {
+      return res.status(400).json({ error: 'Cannot block yourself' });
+    }
+
+    const state = await getUserBlockState(req.user.id, otherUserId);
+    return res.json({
+      blocked: state.blockedByCurrentUser,
+      blocked_by_other_user: state.blockedCurrentUser,
+      either_blocked: state.eitherBlocked
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Failed to load block state' });
+  }
+});
+
+app.post('/api/blocks/:otherUserId', requireAuth, async (req, res) => {
+  try {
+    const currentUserId = normalizeUserId(req.user.id);
+    const otherUserId = normalizeUserId(req.params.otherUserId);
+    const shouldBlock = req.body?.blocked !== false;
+
+    if (!otherUserId) {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+    if (otherUserId === currentUserId) {
+      return res.status(400).json({ error: 'Нельзя заблокировать самого себя' });
+    }
+
+    const [currentProfile, otherProfile] = await Promise.all([
+      getNormalizedProfileById(currentUserId),
+      getNormalizedProfileById(otherUserId)
+    ]);
+
+    if (!currentProfile || !otherProfile) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    const nextBlockedUsers = normalizeBlockedUsers(currentProfile.blocked_users);
+    const alreadyBlocked = nextBlockedUsers.includes(otherUserId);
+
+    if (shouldBlock && !alreadyBlocked) {
+      nextBlockedUsers.push(otherUserId);
+    }
+    if (!shouldBlock && alreadyBlocked) {
+      const index = nextBlockedUsers.indexOf(otherUserId);
+      nextBlockedUsers.splice(index, 1);
+    }
+
+    const updatedProfile = await updateProfile(currentUserId, {
+      blocked_users: normalizeBlockedUsers(nextBlockedUsers)
+    });
+    req.user = updatedProfile;
+
+    if (shouldBlock) {
+      await applyUserBlockConsequences(currentUserId, otherUserId);
+    }
+
+    return res.json({
+      blocked: shouldBlock,
+      blocked_by_other_user: normalizeBlockedUsers(otherProfile.blocked_users).includes(currentUserId),
+      either_blocked: shouldBlock || normalizeBlockedUsers(otherProfile.blocked_users).includes(currentUserId),
+      profile: updatedProfile
+    });
+  } catch (e) {
+    return res.status(e.statusCode || 400).json({ error: e.message || 'Failed to update block state' });
   }
 });
 
@@ -1393,7 +1664,16 @@ app.get('/api/chats/summary', requireAuth, async (req, res) => {
       return summary;
     });
 
-    return res.json({ chats: rows });
+    const visibleRows = [];
+    for (const row of rows) {
+      if (!row.meeting_id && row.__peerProfile?.id) {
+        const state = await getUserBlockState(userId, row.__peerProfile.id);
+        if (state.eitherBlocked) continue;
+      }
+      visibleRows.push(row);
+    }
+
+    return res.json({ chats: visibleRows });
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed to build chats summary' });
   }
@@ -1436,6 +1716,7 @@ app.post('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
     if (!allowed) {
       return res.status(403).json({ error: 'Forbidden' });
     }
+    await assertChatInteractionAllowed(chatId, req.user.id);
 
     const insertedRows = await insertRow('chat_messages', {
       chat_id: chatId,
@@ -1462,7 +1743,7 @@ app.post('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
     }
     return res.json(message);
   } catch (e) {
-    return res.status(400).json({ error: e.message || 'Failed to send message' });
+    return res.status(e.statusCode || 400).json({ error: e.message || 'Failed to send message' });
   }
 });
 
@@ -1482,6 +1763,7 @@ app.get('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
     if (!allowed) {
       return res.status(403).json({ error: 'Forbidden' });
     }
+    await assertChatInteractionAllowed(chatId, req.user.id);
 
     const params = [chatId];
     const conditions = ['chat_id = $1'];
@@ -1516,7 +1798,7 @@ app.get('/api/chats/:chatId/messages', requireAuth, async (req, res) => {
       has_more: hasMore
     });
   } catch (e) {
-    return res.status(400).json({ error: e.message || 'Failed to load messages' });
+    return res.status(e.statusCode || 400).json({ error: e.message || 'Failed to load messages' });
   }
 });
 
