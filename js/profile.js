@@ -155,6 +155,18 @@ function renderProfile(profile) {
     }
   }
 
+  const usernameEl = document.getElementById('profile-username');
+  if (usernameEl) {
+    const username = String(profile.username || '').trim();
+    if (username) {
+      usernameEl.textContent = `@${username}`;
+      usernameEl.style.display = '';
+    } else {
+      usernameEl.textContent = '';
+      usernameEl.style.display = 'none';
+    }
+  }
+
   const metaEl = document.getElementById('profile-meta');
   if (metaEl) metaEl.textContent = profile.age ? `${profile.age} лет` : 'Возраст не указан';
 
@@ -288,6 +300,11 @@ function renderEmptyProfile() {
   if (nameEl) nameEl.textContent = 'Профиль не найден';
   const metaEl = document.getElementById('profile-meta');
   if (metaEl) metaEl.textContent = '';
+  const usernameEl = document.getElementById('profile-username');
+  if (usernameEl) {
+    usernameEl.textContent = '';
+    usernameEl.style.display = 'none';
+  }
   const cityEl = document.getElementById('profile-city');
   if (cityEl) cityEl.textContent = '';
   const interests = document.getElementById('profile-interests');
