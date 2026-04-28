@@ -351,7 +351,18 @@ function validateStep2() {
 }
 
 async function validateStep3() {
-  resetErrors(['avatar']);
+  resetErrors(['avatar', 'email']);
+  
+  const email = document.getElementById('email').value.trim();
+  if (!email) {
+    showError('email-error', 'Введите email');
+    return;
+  }
+  if (!isValidEmail(email)) {
+    showError('email-error', 'Введите корректный email (например: user@example.com)');
+    return;
+  }
+  
   const button = document.getElementById('next-step-3');
   const originalText = button ? button.textContent : '';
   if (button) {
@@ -359,7 +370,6 @@ async function validateStep3() {
     button.disabled = true;
   }
 
-  const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
   const fullName = document.getElementById('full-name').value.trim();
   const age = parseInt(document.getElementById('age').value, 10);
@@ -513,7 +523,37 @@ function handleAvatarUpload(event) {
 }
 
 function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // Более строгая проверка email
+  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+  if (!emailRegex.test(email)) return false;
+  
+  // Дополнительная проверка: домен должен содержать точку и иметь корректную структуру
+  const parts = email.split('@');
+  if (parts.length !== 2) return false;
+  
+  const domain = parts[1].toLowerCase();
+  // Домен должен содержать хотя бы одну точку и не может начинаться/заканчиваться на точку
+  if (!domain.includes('.') || domain.startsWith('.') || domain.endsWith('.')) return false;
+  
+  // Проверка что после последней точки есть минимум 2 символа (например .com, .ru)
+  const lastDotIndex = domain.lastIndexOf('.');
+  if (lastDotIndex === -1 || domain.length - lastDotIndex - 1 < 2) return false;
+  
+  // Разрешённые почтовые домены
+  const allowedDomains = [
+    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
+    'mail.ru', 'yandex.ru', 'yandex.by', 'yandex.kz', 'rambler.ru',
+    'icloud.com', 'protonmail.com', 'proton.me', 'tutanota.com', 'zoho.com',
+    'yandex.com', 'mail.ua', 'ukr.net', 'i.ua', 'bigmir.net',
+    'telegram.org', 'discord.com', 'slack.com', 'bk.ru'
+  ];
+  
+  // Проверяем, что домен в списке разрешённых
+  if (!allowedDomains.includes(domain)) {
+    return false;
+  }
+  
+  return true;
 }
 
 function showError(elementId, message) {
