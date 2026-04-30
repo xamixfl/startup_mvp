@@ -537,6 +537,84 @@
         .member-remove:hover {
             background: #fecaca;
         }
+
+        @media (max-width: 760px) {
+            body {
+                padding: 8px 12px 20px;
+            }
+
+            .header {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+
+            .logo {
+                font-size: 30px;
+            }
+
+            .back-link {
+                display: inline-flex;
+                align-items: center;
+                min-height: 42px;
+            }
+
+            .card {
+                padding: 16px;
+                border-radius: 18px;
+            }
+
+            .tag-row {
+                flex-wrap: wrap;
+                gap: 10px;
+                align-items: flex-start;
+            }
+
+            .tag,
+            .city {
+                max-width: 100%;
+            }
+
+            .owner-actions {
+                margin-left: auto;
+            }
+
+            .headline {
+                font-size: 26px;
+                line-height: 1.15;
+            }
+
+            .meeting-countdown,
+            .join-btn,
+            .join-unavailable,
+            #open-chat-btn,
+            #leave-chat-btn {
+                width: 100%;
+            }
+
+            .side-block {
+                gap: 12px;
+            }
+
+            .creator {
+                align-items: center;
+            }
+
+            .member-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .member-remove {
+                width: 100%;
+            }
+
+            .footer {
+                margin-top: 24px;
+                padding-bottom: calc(10px + env(safe-area-inset-bottom));
+            }
+        }
     </style>
 </head>
 <body>

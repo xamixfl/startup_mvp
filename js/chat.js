@@ -22,8 +22,13 @@ let chatListRefreshTimer = null;
 
 let currentChatMessageSignature = 'empty';
 let pendingImageFile = null;
+let isSendingMessage = false;
+let moderationChatEnsured = false;
 const MAX_IMAGE_MB = 5;
 const MESSAGE_PAGE_SIZE = 50;
+const MESSAGE_POLL_INTERVAL_MS = 2000;
+const CHAT_LIST_POLL_INTERVAL_MS = 30000;
+const TYPING_TTL_MS = 3500;
 let currentChatLastCreatedAt = null;
 let openedChatReadAt = {};
 const renderedMessageKeysByChat = new Map();
@@ -43,6 +48,60 @@ function showNotification(message) {
   setTimeout(() => {
     notification.style.display = 'none';
   }, 2500);
+}
+
+function isMobileViewport() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function syncMobileChatState(isChatOpen) {
+  const app = document.getElementById('chat-app');
+  if (!app || !isMobileViewport()) return;
+  app.classList.toggle('mobile-chat-open', !!isChatOpen);
+  if (!isChatOpen) {
+    app.classList.remove('mobile-info-open');
+  }
+}
+
+function closeMobileChatView() {
+  syncMobileChatState(false);
+}
+
+function setupMobileLayout() {
+  const backBtn = document.getElementById('mobile-chat-back');
+  if (backBtn && backBtn.dataset.bound !== 'true') {
+    backBtn.dataset.bound = 'true';
+    backBtn.addEventListener('click', () => {
+      closeMobileChatView();
+    });
+  }
+
+  const infoBtn = document.getElementById('mobile-info-toggle');
+  if (infoBtn && infoBtn.dataset.bound !== 'true') {
+    infoBtn.dataset.bound = 'true';
+    infoBtn.addEventListener('click', () => {
+      if (!currentChat) return;
+      toggleInfoPanel();
+    });
+  }
+
+  const overlay = document.getElementById('info-overlay');
+  if (overlay && overlay.dataset.bound !== 'true') {
+    overlay.dataset.bound = 'true';
+    overlay.addEventListener('click', () => toggleInfoPanel(false));
+  }
+
+  window.addEventListener('resize', () => {
+    if (!isMobileViewport()) {
+      const app = document.getElementById('chat-app');
+      if (app) {
+        app.classList.remove('mobile-chat-open');
+        app.classList.remove('mobile-info-open');
+      }
+    } else if (currentChat) {
+      syncMobileChatState(true);
+    }
+  }, { passive: true });
 }
 
 function showChatBootError(error) {
@@ -171,6 +230,7 @@ async function initChatPage() {
     setupImageModal();
     setupTitleToggle();
     setupChatBodyPagination();
+    setupMobileLayout();
 
     startChatListPolling();
   } catch (error) {
@@ -214,6 +274,7 @@ async function safeInsertChatMember(data) {
 
 async function ensureModerationChatExistsForAdmins() {
   if (!currentUser || currentUser.role !== 'admin') return null;
+  if (moderationChatEnsured) return null;
 
   let admins = [];
   try {
@@ -247,6 +308,7 @@ async function ensureModerationChatExistsForAdmins() {
   }
   if (!chat) return null;
 
+  moderationChatEnsured = true;
   chat.title = ADMIN_MODERATION_CHAT_TITLE;
   chat.is_admin_chat = true;
   chat.__subTitle = 'Жёлтый чат для жалоб и апелляций';
@@ -307,7 +369,7 @@ function startChatListPolling() {
   chatListPollTimer = setInterval(async () => {
     if (!currentUser) return;
     await loadChats(true);
-  }, 30000);
+  }, CHAT_LIST_POLL_INTERVAL_MS);
 }
 
 function stopChatListPolling() {
@@ -320,7 +382,7 @@ function startMessagePolling(chatId) {
   messagePollTimer = setInterval(async () => {
     if (!currentChat || currentChat.id !== chatId) return;
     await pollNewMessages(chatId);
-  }, 3000);
+  }, MESSAGE_POLL_INTERVAL_MS);
 }
 
 function stopMessagePolling() {
@@ -353,7 +415,6 @@ function startRealtimeStream() {
 
   chatEventSource.addEventListener('ready', () => {
     chatRealtimeConnected = true;
-    stopMessagePolling();
     stopTypingPolling();
   });
 
@@ -485,6 +546,9 @@ async function loadChats(isRefresh = false) {
     const summaryChats = Array.isArray(summary?.chats) ? summary.chats : [];
     chats = await filterOutStaleMeetingChats(summaryChats);
 
+    const pendingOpenChatId = window.__pendingOpenChatId || currentChat?.id || null;
+    chats = chats.filter(chat => chat?.meeting_id || chat?.__lastMessage || isModerationChat(chat) || chat?.id === pendingOpenChatId);
+
     if (chats.length === 0) {
       list.innerHTML = '<div class="chat-item">Нет чатов</div>';
       renderEmptyChat();
@@ -498,7 +562,7 @@ async function loadChats(isRefresh = false) {
     if (pendingId) {
       window.__pendingOpenChatId = null;
       openChat(pendingId);
-    } else if (!currentChat && chats.length > 0) {
+    } else if (!currentChat && chats.length > 0 && !isMobileViewport()) {
       openChat(chats[0].id);
     } else if (currentChat) {
       // keep selection highlight
@@ -635,6 +699,7 @@ async function openChat(chatId) {
 
   currentChat = chat;
   highlightActiveChat(chatId);
+  syncMobileChatState(true);
 
   const title = document.getElementById('chat-title');
   if (title) title.textContent = getChatDisplayTitle(chat);
@@ -672,11 +737,12 @@ async function openChat(chatId) {
   if (badgeEl) badgeEl.style.display = 'none';
   updateChatListUnreadBadges().catch(() => {});
 
+  // Keep lightweight polling always on for the opened chat.
+  // This protects against silent SSE stalls in some proxy/browser setups.
+  startMessagePolling(chatId);
   if (chatRealtimeConnected) {
-    stopMessagePolling();
     stopTypingPolling();
   } else {
-    startMessagePolling(chatId);
     startTypingPolling(chatId);
   }
 }
@@ -685,6 +751,16 @@ function renderEmptyChat(text = 'Выберите чат слева') {
   const body = document.getElementById('chat-body');
   if (!body) return;
   body.innerHTML = `<div class="chat-empty">${escapeHtml(text)}</div>`;
+}
+
+function setChatControlsEnabled(enabled) {
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send');
+  const attachBtn = document.getElementById('chat-attach');
+  if (input) input.disabled = !enabled;
+  if (sendBtn) sendBtn.disabled = !enabled;
+  if (attachBtn) attachBtn.disabled = !enabled;
+  isSendingMessage = !enabled;
 }
 
 function computeMessageSignature(messages) {
@@ -1117,18 +1193,24 @@ function setupSendMessage() {
   if (!sendBtn || !input) return;
 
   sendBtn.onclick = async () => {
+    if (isSendingMessage) return;
     const text = input.value.trim();
     if (!currentChat) return;
     if (!text && !pendingImageFile) return;
 
-    await ensureDirectPeer(currentChat);
+    setChatControlsEnabled(false);
+    const ensurePromise = ensureDirectPeer(currentChat).catch(() => {});
 
     if (pendingImageFile) {
       const fileToSend = pendingImageFile;
       pendingImageFile = null;
       clearImagePreview();
       await uploadAndSendImage(fileToSend);
-      if (!text) return;
+      await ensurePromise;
+      if (!text) {
+        setChatControlsEnabled(true);
+        return;
+      }
     }
 
     try {
@@ -1137,6 +1219,7 @@ function setupSendMessage() {
         body: JSON.stringify({ content: text })
       });
       input.value = '';
+      await ensurePromise;
 
       if (!chatRealtimeConnected && row) {
         await handleRealtimeMessage(currentChat.id, row);
@@ -1144,6 +1227,8 @@ function setupSendMessage() {
     } catch (error) {
       console.error('Ошибка отправки сообщения:', error);
       alert(error.message || 'Сообщение не отправлено');
+    } finally {
+      setChatControlsEnabled(true);
     }
   };
 
@@ -1415,8 +1500,16 @@ function setupTitleToggle() {
 function toggleInfoPanel(force) {
   const app = document.getElementById('chat-app');
   if (!app) return;
-  const next = typeof force === 'boolean' ? force : !app.classList.contains('show-info');
-  app.classList.toggle('show-info', next);
+  const desktopOpen = app.classList.contains('show-info');
+  const mobileOpen = app.classList.contains('mobile-info-open');
+  const next = typeof force === 'boolean' ? force : !(isMobileViewport() ? mobileOpen : desktopOpen);
+
+  if (isMobileViewport()) {
+    app.classList.toggle('mobile-info-open', next);
+  } else {
+    app.classList.toggle('show-info', next);
+  }
+
   if (next) {
     renderInfoPanel(currentChat).catch(() => {});
   }

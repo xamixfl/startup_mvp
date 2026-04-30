@@ -6,6 +6,25 @@ let CATEGORIES = [];
 const PENDING_SIGNUP_STORAGE_KEY = 'pending_signup_payload';
 const RESEND_COOLDOWN_STORAGE_KEY = 'pending_signup_resend_until';
 let resendCooldownTimerId = null;
+const collapsedCategoryGroups = new Set();
+const TOPIC_EMOJI_FALLBACKS = [
+  { emoji: '🎨', keywords: ['искус', 'арт', 'дизайн', 'рисов', 'творч'] },
+  { emoji: '🎵', keywords: ['музык', 'песн', 'концерт', 'вокал'] },
+  { emoji: '🎬', keywords: ['кино', 'фильм', 'сериал'] },
+  { emoji: '📚', keywords: ['книг', 'литератур', 'чтени', 'поэз'] },
+  { emoji: '💻', keywords: ['it', 'айти', 'программ', 'код', 'технол', 'стартап'] },
+  { emoji: '🎮', keywords: ['игр', 'game', 'гейм', 'кибер'] },
+  { emoji: '⚽', keywords: ['спорт', 'футбол', 'баскетбол', 'волейбол'] },
+  { emoji: '🏋️', keywords: ['фитнес', 'тренаж', 'йог', 'пилатес', 'бег', 'workout'] },
+  { emoji: '🏔️', keywords: ['поход', 'хайкинг', 'горы', 'природ', 'кемп'] },
+  { emoji: '✈️', keywords: ['путеше', 'travel', 'туризм', 'поездк'] },
+  { emoji: '🍳', keywords: ['еда', 'кулинар', 'готов', 'кухн', 'кофе', 'ресторан'] },
+  { emoji: '🧘', keywords: ['медитац', 'осознан', 'психолог', 'wellness'] },
+  { emoji: '🗣️', keywords: ['язык', 'англий', 'speaking', 'общени', 'нетворк'] },
+  { emoji: '👨‍💼', keywords: ['бизнес', 'карьер', 'предприним', 'маркетинг'] },
+  { emoji: '🎉', keywords: ['вечерин', 'тусов', 'развлеч', 'ивент'] },
+  { emoji: '🧩', keywords: ['настол', 'квиз', 'головолом', 'quiz'] }
+];
 
 document.addEventListener('DOMContentLoaded', async () => {
   CATEGORIES = await window.fetchTopics();
@@ -125,7 +144,19 @@ function resolveCategoryLabel(category) {
     }
   }
 
+  if (!icon) {
+    icon = getFallbackTopicEmoji(displayName || category?.name || '');
+  }
+
   return { icon, displayName };
+}
+
+function getFallbackTopicEmoji(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+
+  const match = TOPIC_EMOJI_FALLBACKS.find(entry => entry.keywords.some(keyword => normalized.includes(keyword)));
+  return match ? match.emoji : '✨';
 }
 
 function initCategories() {
@@ -139,11 +170,35 @@ function initCategories() {
   groups.forEach(group => {
     const groupEl = document.createElement('section');
     groupEl.className = 'category-group';
+    groupEl.dataset.groupId = String(group.id || group.title || '');
 
-    const title = document.createElement('div');
-    title.className = 'category-group-title';
-    title.textContent = group.title;
-    groupEl.appendChild(title);
+    const selectedCount = group.items.filter(category => {
+      const existing = document.querySelector(`.category-checkbox[value="${CSS.escape(String(category.id))}"]`);
+      return Boolean(existing?.checked);
+    }).length;
+
+    const shouldCollapse = collapsedCategoryGroups.has(groupEl.dataset.groupId)
+      || (!selectedCount && container.children.length > 0);
+    if (shouldCollapse) groupEl.classList.add('is-collapsed');
+
+    const groupIcon = isValidEmojiIcon(String(group.icon || '').trim())
+      ? String(group.icon || '').trim()
+      : getFallbackTopicEmoji(group.title);
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'category-group-toggle';
+    toggle.setAttribute('aria-expanded', shouldCollapse ? 'false' : 'true');
+    toggle.dataset.groupToggle = groupEl.dataset.groupId;
+    toggle.innerHTML = `
+      <span class="category-group-heading">
+        ${groupIcon ? `<span class="category-icon" aria-hidden="true">${groupIcon}</span>` : ''}
+        <span class="category-group-title">${group.title}</span>
+        <span class="category-group-count">${group.items.length}</span>
+      </span>
+      <span class="category-group-chevron" aria-hidden="true">▼</span>
+    `;
+    groupEl.appendChild(toggle);
 
     const itemsWrap = document.createElement('div');
     itemsWrap.className = 'category-group-items';
@@ -174,6 +229,10 @@ function initCategories() {
   });
 
   container.addEventListener('change', updateSelectedCategoriesLabel);
+  if (!container.dataset.groupToggleBound) {
+    container.addEventListener('click', handleCategoryGroupToggle);
+    container.dataset.groupToggleBound = 'true';
+  }
   updateSelectedCategoriesLabel();
 }
 
@@ -195,6 +254,8 @@ function setupCategoriesDropdown() {
   document.addEventListener('click', e => {
     if (!dropdown.contains(e.target)) closeCategoriesMenu();
   });
+
+  trapScrollWithin(menu.querySelector('.categories-list'));
 }
 
 function openCategoriesMenu() {
@@ -243,6 +304,10 @@ function filterCategoriesList(query) {
       }
     });
     group.style.display = groupVisible > 0 ? '' : 'none';
+    if (groupVisible > 0 && q) setCategoryGroupCollapsed(group, false);
+    if (!q && collapsedCategoryGroups.has(group.dataset.groupId)) {
+      setCategoryGroupCollapsed(group, true);
+    }
   });
   if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
 }
@@ -282,6 +347,60 @@ function removeSelectedCategory(id) {
   if (!checkbox) return;
   checkbox.checked = false;
   updateSelectedCategoriesLabel();
+}
+
+function handleCategoryGroupToggle(event) {
+  const toggle = event.target.closest('.category-group-toggle');
+  if (!toggle) return;
+  const group = toggle.closest('.category-group');
+  if (!group) return;
+  setCategoryGroupCollapsed(group, !group.classList.contains('is-collapsed'));
+}
+
+function setCategoryGroupCollapsed(group, collapsed) {
+  const groupId = String(group?.dataset?.groupId || '');
+  const toggle = group?.querySelector('.category-group-toggle');
+  if (!group || !groupId || !toggle) return;
+
+  group.classList.toggle('is-collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+
+  if (collapsed) collapsedCategoryGroups.add(groupId);
+  else collapsedCategoryGroups.delete(groupId);
+}
+
+function trapScrollWithin(element) {
+  if (!element || element.dataset.scrollTrapBound) return;
+
+  element.addEventListener('wheel', event => {
+    const { scrollTop, scrollHeight, clientHeight } = element;
+    const delta = event.deltaY;
+    const atTop = scrollTop <= 0;
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+
+    if ((delta < 0 && atTop) || (delta > 0 && atBottom)) {
+      event.preventDefault();
+    }
+  }, { passive: false });
+
+  let touchStartY = 0;
+  element.addEventListener('touchstart', event => {
+    touchStartY = event.touches[0]?.clientY || 0;
+  }, { passive: true });
+
+  element.addEventListener('touchmove', event => {
+    const currentY = event.touches[0]?.clientY || 0;
+    const deltaY = touchStartY - currentY;
+    const { scrollTop, scrollHeight, clientHeight } = element;
+    const atTop = scrollTop <= 0;
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+
+    if ((deltaY < 0 && atTop) || (deltaY > 0 && atBottom)) {
+      event.preventDefault();
+    }
+  }, { passive: false });
+
+  element.dataset.scrollTrapBound = 'true';
 }
 
 async function validateStep1() {
@@ -377,7 +496,18 @@ function validateStep2() {
 }
 
 async function validateStep3() {
-  resetErrors(['avatar']);
+  resetErrors(['avatar', 'email']);
+  
+  const email = document.getElementById('email').value.trim();
+  if (!email) {
+    showError('email-error', 'Введите email');
+    return;
+  }
+  if (!isValidEmail(email)) {
+    showError('email-error', 'Введите корректный email (например: user@example.com)');
+    return;
+  }
+  
   const button = document.getElementById('next-step-3');
   const originalText = button ? button.textContent : '';
   if (button) {
@@ -385,7 +515,6 @@ async function validateStep3() {
     button.disabled = true;
   }
 
-  const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
   const fullName = document.getElementById('full-name').value.trim();
   const age = parseInt(document.getElementById('age').value, 10);
@@ -431,7 +560,6 @@ async function validateStep3() {
       role: 'user',
       blocked_users: []
     };
-
     const signupPayload = await fetch('/api/auth/signup', {
       method: 'POST',
       credentials: 'same-origin',
@@ -671,7 +799,37 @@ function handleAvatarUpload(event) {
 }
 
 function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // Более строгая проверка email
+  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+  if (!emailRegex.test(email)) return false;
+  
+  // Дополнительная проверка: домен должен содержать точку и иметь корректную структуру
+  const parts = email.split('@');
+  if (parts.length !== 2) return false;
+  
+  const domain = parts[1].toLowerCase();
+  // Домен должен содержать хотя бы одну точку и не может начинаться/заканчиваться на точку
+  if (!domain.includes('.') || domain.startsWith('.') || domain.endsWith('.')) return false;
+  
+  // Проверка что после последней точки есть минимум 2 символа (например .com, .ru)
+  const lastDotIndex = domain.lastIndexOf('.');
+  if (lastDotIndex === -1 || domain.length - lastDotIndex - 1 < 2) return false;
+  
+  // Разрешённые почтовые домены
+  const allowedDomains = [
+    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
+    'mail.ru', 'yandex.ru', 'yandex.by', 'yandex.kz', 'rambler.ru',
+    'icloud.com', 'protonmail.com', 'proton.me', 'tutanota.com', 'zoho.com',
+    'yandex.com', 'mail.ua', 'ukr.net', 'i.ua', 'bigmir.net',
+    'telegram.org', 'discord.com', 'slack.com', 'bk.ru'
+  ];
+  
+  // Проверяем, что домен в списке разрешённых
+  if (!allowedDomains.includes(domain)) {
+    return false;
+  }
+  
+  return true;
 }
 
 function showError(elementId, message) {

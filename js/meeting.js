@@ -476,6 +476,21 @@ async function requestJoin(meeting, user) {
     window.location.href = `login.html?next=${encodeURIComponent(returnTo)}`;
     return;
   }
+
+  const meetingId = meeting?.id || meeting?.meeting_id;
+  if (!meetingId) {
+    showNotification('Невозможно определить встречу');
+    return;
+  }
+
+  const freshMeeting = await fetchMeeting(meetingId);
+  if (!freshMeeting) {
+    showNotification('Встреча не найдена');
+    return;
+  }
+
+  Object.assign(meeting, freshMeeting);
+
   if (isMeetingFull(meeting)) {
     showNotification('Свободных мест сейчас нет');
     await setupChatState(meeting, user);
@@ -494,59 +509,35 @@ async function requestJoin(meeting, user) {
   }
 
   try {
-    const hasStatus = await chatMembersHasStatus();
-    if (hasStatus) {
-      await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id, role: 'member', status: 'pending' });
-      if (meeting.creator_id && meeting.creator_id !== user.id && typeof window.createUserNotification === 'function') {
-        const senderName = user.full_name || user.username || user.email || 'Пользователь';
-        await window.createUserNotification(meeting.creator_id, {
-          notification_type: 'event_join_request',
-          related_table: 'meetings',
-          related_id: meeting.id,
-          title: meeting.title || 'Встреча',
-          message: `${senderName} хочет присоединиться к встрече «${meeting.title || 'Встреча'}».`
-        });
-      }
-      showNotification('Заявка отправлена');
-    } else {
-      await safeInsertChatMember({ chat_id: meeting.chat_id, user_id: user.id });
-      // Legacy mode: joining is immediate.
-      let participantAdded = false;
-      try {
-        const existingParticipant = await api.get(TABLES.participants, { meeting_id: meeting.id, user_id: user.id, $limit: 1 });
-        if (!existingParticipant || !existingParticipant[0]) {
-          await ensureParticipantRecord(meeting.id, user.id);
-          participantAdded = true;
-        }
-      } catch (_e) {
-        const inserted = await ensureParticipantRecord(meeting.id, user.id);
-        participantAdded = !!inserted;
-      }
+    const result = await api.request(`/api/meetings/${encodeURIComponent(meetingId)}/join-request`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
 
-      if (participantAdded) {
-        const currentSlots = meeting.current_slots || 0;
-        await api.update(TABLES.meetings, meeting.id, { current_slots: currentSlots + 1 });
-        meeting.current_slots = currentSlots + 1;
-
-        if (meeting.creator_id && meeting.creator_id !== user.id && typeof window.createUserNotification === 'function') {
-          const senderName = user.full_name || user.username || user.email || 'Пользователь';
-          await window.createUserNotification(meeting.creator_id, {
-            notification_type: 'event_joined_direct',
-            related_table: 'meetings',
-            related_id: meeting.id,
-            title: 'Новый участник встречи',
-            message: `${senderName} присоединился к встрече «${meeting.title || 'Встреча'}».`
-          });
-        }
-      }
-
-      showNotification('Вы присоединились к встрече');
+    if (result?.state === 'joined' && Number.isFinite(Number(result.current_slots))) {
+      meeting.current_slots = Number(result.current_slots);
     }
+
+    if (result?.state === 'pending') {
+      showNotification(result?.alreadyExists ? 'Заявка уже отправлена' : 'Заявка отправлена');
+    } else {
+      showNotification(result?.alreadyExists ? 'Вы уже в чате' : 'Вы присоединились к встрече');
+    }
+
     const freshUser = typeof window.getCurrentUser === 'function' ? await window.getCurrentUser() : await api.request('/api/auth/me');
     await setupChatState(meeting, freshUser || user);
     await renderParticipantsList(meeting, freshUser || user);
   } catch (e) {
     console.error('Ошибка отправки заявки:', e);
+    if (Number(e?.status) === 404 || Number(e?.statusCode) === 404) {
+      showNotification('Встреча не найдена');
+      return;
+    }
+    if (String(e?.message || '').includes('Свободных мест сейчас нет')) {
+      showNotification('Свободных мест сейчас нет');
+      await setupChatState(meeting, user);
+      return;
+    }
     showNotification(e.message || 'Ошибка отправки заявки');
   }
 }
@@ -620,27 +611,16 @@ async function leaveChat(meeting, user) {
   const confirmLeave = confirm('Покинуть чат встречи?');
   if (!confirmLeave) return;
   try {
-    let shouldDecrement = true;
-    try {
-      const hasStatus = await chatMembersHasStatus();
-      if (hasStatus) {
-        const rows = await api.get(TABLES.chat_members, { chat_id: meeting.chat_id, user_id: user.id });
-        const m = (rows || [])[0];
-        shouldDecrement = (m && m.status === 'approved');
-      }
-    } catch (_e) {}
-
     const userName = user.full_name || user.username || 'Пользователь';
     await window.postChatSystemMessage?.(meeting.chat_id, `${userName} покинул чат встречи`, user.id);
 
-    await api.query(TABLES.chat_members, 'deleteWhere', {}, { chat_id: meeting.chat_id, user_id: user.id });
-    if (shouldDecrement) {
-      const currentSlots = meeting.current_slots || 1;
-      const nextSlots = Math.max(currentSlots - 1, 0);
-      await api.update(TABLES.meetings, meeting.id, { current_slots: nextSlots });
-      meeting.current_slots = nextSlots;
+    const leaveResult = await api.request(`/api/meetings/${encodeURIComponent(meeting.id)}/leave`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    if (Number.isFinite(Number(leaveResult?.current_slots))) {
+      meeting.current_slots = Number(leaveResult.current_slots);
     }
-    await removeParticipantRecord(meeting.id, user.id);
 
     showNotification('Вы вышли из чата');
     await setupChatState(meeting, user);

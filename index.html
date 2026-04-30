@@ -999,6 +999,120 @@
         .footer a:hover {
             text-decoration: underline;
         }
+
+        @media (max-width: 820px) {
+            body {
+                max-width: none;
+                padding: 8px 12px 20px;
+            }
+
+            .header {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 12px;
+                margin-bottom: 16px;
+            }
+
+            .logo {
+                font-size: 32px;
+            }
+
+            .user-section {
+                width: 100%;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                justify-content: space-between;
+            }
+
+            .nav-link,
+            .user-link {
+                border-right: none;
+                border: 1px solid #e2e8f0;
+                border-radius: 12px;
+                padding: 10px 12px;
+                font-size: 14px;
+                min-height: 44px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: #fff;
+            }
+
+            .search-bar {
+                margin-bottom: 14px;
+            }
+
+            .search-input {
+                min-height: 46px;
+                font-size: 16px;
+            }
+
+            .main-grid {
+                gap: 14px;
+            }
+
+            .sidebar {
+                padding: 16px;
+                border-radius: 18px;
+            }
+
+            .btn-create {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .filter-section {
+                padding: 14px;
+            }
+
+            .filter-menu {
+                max-height: 280px;
+            }
+
+            .selected-topic-pills,
+            .selected-city-pills {
+                gap: 6px;
+            }
+
+            .meetings-feed {
+                gap: 12px;
+            }
+
+            .meeting-card {
+                padding: 16px;
+                border-radius: 18px;
+            }
+
+            .meeting-topline,
+            .meeting-thread,
+            .meeting-meta {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .meeting-location,
+            .meeting-countdown {
+                width: 100%;
+            }
+
+            .modal-content {
+                width: calc(100vw - 24px);
+                padding: 18px;
+                max-height: calc(100vh - 24px);
+                border-radius: 18px;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .footer {
+                margin-top: 28px;
+                padding-bottom: calc(10px + env(safe-area-inset-bottom));
+            }
+        }
     </style>
 </head>
 

@@ -55,6 +55,7 @@ const TYPING_TTL_MS = 3500;
 const schemaColumnCache = new Map();
 const eventClients = new Map();
 const EXPIRED_MEETINGS_CLEANUP_INTERVAL_MS = 60 * 1000;
+let moderationChatEnsured = false;
 const loginRateLimitState = new Map();
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
@@ -1334,6 +1335,152 @@ app.get('/api/meetings', async (_req, res) => {
   }
 });
 
+app.post('/api/meetings/:meetingId/join-request', requireAuth, async (req, res) => {
+  try {
+    const meetingId = String(req.params.meetingId || '');
+    if (!meetingId) return res.status(400).json({ error: 'Missing meetingId' });
+
+    const meetingRows = await selectRows('meetings', { id: meetingId, $limit: 1 });
+    const meeting = (meetingRows || [])[0];
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+    if (!meeting.chat_id) return res.status(400).json({ error: 'Chat not created' });
+
+    const maxSlots = Number(meeting.max_slots || 0);
+    const currentSlots = Number(meeting.current_slots || 0);
+    if (maxSlots > 0 && currentSlots >= maxSlots) {
+      return res.status(409).json({ error: 'Свободных мест сейчас нет' });
+    }
+
+    const userId = String(req.user.id || '');
+    const existingRows = await selectRows('chat_members', {
+      chat_id: meeting.chat_id,
+      user_id: userId,
+      $limit: 1
+    });
+    const existing = (existingRows || [])[0];
+    const hasStatus = await tableHasColumn('chat_members', 'status');
+    const hasRole = await tableHasColumn('chat_members', 'role');
+
+    if (existing) {
+      if (hasStatus && existing.status === 'pending') {
+        return res.json({ ok: true, state: 'pending', alreadyExists: true });
+      }
+      return res.json({ ok: true, state: 'joined', alreadyExists: true });
+    }
+
+    const membershipData = {
+      chat_id: meeting.chat_id,
+      user_id: userId
+    };
+    if (hasRole) membershipData.role = 'member';
+    if (hasStatus) membershipData.status = 'pending';
+    await insertRow('chat_members', membershipData);
+
+    if (hasStatus) {
+      if (meeting.creator_id && String(meeting.creator_id) !== userId) {
+        const senderName = getProfileDisplayNameServer(req.user, userId);
+        await insertRow('notifications', {
+          admin_profile_id: meeting.creator_id,
+          notification_type: 'event_join_request',
+          related_table: 'meetings',
+          related_id: meeting.id,
+          title: meeting.title || 'Встреча',
+          message: `${senderName} хочет присоединиться к встрече «${meeting.title || 'Встреча'}».`,
+          is_read: false,
+          read_at: null
+        });
+      }
+      return res.json({ ok: true, state: 'pending' });
+    }
+
+    const existingParticipant = await selectRows('table-connector', {
+      meeting_id: meeting.id,
+      user_id: userId,
+      $limit: 1
+    });
+    let participantAdded = false;
+    if (!existingParticipant || !existingParticipant[0]) {
+      await insertRow('table-connector', { meeting_id: meeting.id, user_id: userId });
+      participantAdded = true;
+    }
+
+    let nextSlots = currentSlots;
+    if (participantAdded) {
+      nextSlots = currentSlots + 1;
+      await updateRow('meetings', { id: meeting.id, current_slots: nextSlots });
+      if (meeting.creator_id && String(meeting.creator_id) !== userId) {
+        const senderName = getProfileDisplayNameServer(req.user, userId);
+        await insertRow('notifications', {
+          admin_profile_id: meeting.creator_id,
+          notification_type: 'event_joined_direct',
+          related_table: 'meetings',
+          related_id: meeting.id,
+          title: 'Новый участник встречи',
+          message: `${senderName} присоединился к встрече «${meeting.title || 'Встреча'}».`,
+          is_read: false,
+          read_at: null
+        });
+      }
+    }
+
+    return res.json({ ok: true, state: 'joined', current_slots: nextSlots });
+  } catch (e) {
+    const status = Number(e?.statusCode || e?.status || 400);
+    return res.status(status).json({ error: e.message || 'Failed to create join request' });
+  }
+});
+
+app.post('/api/meetings/:meetingId/leave', requireAuth, async (req, res) => {
+  try {
+    const meetingId = String(req.params.meetingId || '');
+    if (!meetingId) return res.status(400).json({ error: 'Missing meetingId' });
+
+    const meetingRows = await selectRows('meetings', { id: meetingId, $limit: 1 });
+    const meeting = (meetingRows || [])[0];
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    const userId = String(req.user.id || '');
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (String(meeting.creator_id || '') === userId) {
+      return res.status(403).json({ error: 'Creator cannot leave own meeting' });
+    }
+
+    let shouldDecrement = true;
+    if (meeting.chat_id) {
+      const hasStatus = await tableHasColumn('chat_members', 'status');
+      if (hasStatus) {
+        const rows = await selectRows('chat_members', { chat_id: meeting.chat_id, user_id: userId });
+        const membership = (rows || [])[0] || null;
+        shouldDecrement = membership?.status === 'approved';
+      }
+      await deleteWhere('chat_members', { chat_id: meeting.chat_id, user_id: userId });
+    }
+
+    try {
+      await deleteWhere('table-connector', { meeting_id: meetingId, user_id: userId });
+    } catch (_e) {}
+
+    let nextSlots = Number(meeting.current_slots || 0);
+    if (shouldDecrement) {
+      const updateResult = await query(
+        `UPDATE meetings
+            SET current_slots = GREATEST(COALESCE(current_slots, 0) - 1, 0)
+          WHERE id = $1
+          RETURNING current_slots`,
+        [meetingId]
+      );
+      nextSlots = Number(updateResult.rows?.[0]?.current_slots || 0);
+    }
+
+    return res.json({
+      ok: true,
+      current_slots: nextSlots
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || 'Failed to leave meeting' });
+  }
+});
+
 app.delete('/api/meetings/:meetingId/cascade', requireAuth, async (req, res) => {
   try {
     const meetingId = String(req.params.meetingId || '');
@@ -1824,24 +1971,26 @@ app.post('/api/chats/unread-summary', requireAuth, async (req, res) => {
     }
 
     const params = [userId, chatIds];
-    const messagesResult = await query(
-      `SELECT chat_id, created_at
-         FROM chat_messages
-        WHERE chat_id = ANY($2::uuid[])
-          AND user_id <> $1`,
-      params
+    const lastReads = chatIds.map(id => lastReadMap[id] || null);
+    const countsResult = await query(
+      `SELECT x.chat_id AS chat_id,
+              COUNT(m.*) AS count
+         FROM unnest($1::uuid[], $2::timestamptz[]) AS x(chat_id, last_read)
+         LEFT JOIN chat_messages m
+           ON m.chat_id = x.chat_id
+          AND m.user_id <> $3
+          AND (x.last_read IS NULL OR m.created_at > x.last_read)
+        GROUP BY x.chat_id`,
+      [chatIds, lastReads, userId]
     );
 
     const counts = {};
-    for (const chatId of chatIds) {
-      counts[chatId] = 0;
+    for (const row of countsResult.rows || []) {
+      counts[row.chat_id] = Number(row.count || 0);
     }
-
-    for (const row of messagesResult.rows || []) {
-      const chatId = row.chat_id;
-      const lastRead = lastReadMap[chatId];
-      if (!lastRead || new Date(row.created_at).getTime() > new Date(lastRead).getTime()) {
-        counts[chatId] = (counts[chatId] || 0) + 1;
+    for (const chatId of chatIds) {
+      if (!Object.prototype.hasOwnProperty.call(counts, chatId)) {
+        counts[chatId] = 0;
       }
     }
 
